@@ -9,11 +9,13 @@ const LEARN: &str = r#"Calque quick reference
 Bindings: (let x value), (mut x value), (alter! x value), (letrec f (lambda ...))
 Functions: (lambda (a b) body...), called as (f a b); extra body forms are sequenced.
 Data: vectors [1 2 3], tuples {a b}, strings "text", characters 'x'.
+Records: (record Point x Int y Int); construct with (Point 1 2), access with (Point/x point).
 Control: (if test yes no), (cond test value ... default), (while test body...), (loop i test body...).
 Mutation: (get i xs), (push! x xs), (set! i x xs), (pop! xs), (empty! xs), (capacity! n xs), (&mut cell), (&alter! cell value).
 Pipelines pass data last: (|> xs (map f) (select pred)).
 Enums: (enum Letter A B C); values are compact typed tags, not Ints.
 Match enums exhaustively: (match letter A value-a B value-b C value-c), or use _ as the final default.
+Payload enums: (enum Tree Empty (Node value Int left Tree right Tree)); match with (Node value left right).
 Compare values from the same enum with (=~ a b); cross-enum comparisons are rejected.
 Enums can be Table keys directly: (Table/set! A 1 points), (Table/get A points); no string conversion occurs.
 See `que --examples` for a complete enum, match, Table, and serialize/deserialize example.
@@ -56,6 +58,13 @@ const EXAMPLES: &str = r#"Calque examples
 ; deserialize needs its result type to choose a decoder.
 (sig restored [[{ Shape Int }]])
 (let restored (deserialize saved))
+
+; Recursive payload enums use the same explicit readable format.
+(enum Tree Empty (Node value Int left Tree right Tree))
+(let tree-text (serialize (Node 4 Empty Empty)))
+; Tree{ Node 4 Tree{ Empty } Tree{ Empty } }
+(sig restored-tree Tree)
+(let restored-tree (deserialize tree-text))
 
 (match Rock
   Rock (if (beats? Rock Scissors) (snd (get 0 (Table/get Rock restored))) 0)

@@ -35,7 +35,7 @@
     call $__deser_get local.get $c i32.ne if unreachable end)
 
   (func $__deser_int (result i32)
-    (local $negative i32) (local $value i64) (local $c i32)
+    (local $negative i32) (local $value i64) (local $c i32) (local $digits i32)
     call $__deser_ws
     call $__deser_peek i32.const 45 i32.eq
     if i32.const 1 local.set $negative call $__deser_get drop end
@@ -43,10 +43,14 @@
       call $__deser_peek local.tee $c i32.const 48 i32.lt_s br_if $done
       local.get $c i32.const 57 i32.gt_s br_if $done
       call $__deser_get drop
+      local.get $digits i32.const 1 i32.add local.set $digits
       local.get $value i64.const 10 i64.mul
       local.get $c i32.const 48 i32.sub i64.extend_i32_u i64.add local.set $value
       br $digits
     end end
+    ;; Do not silently turn a missing integer into zero.  In particular this
+    ;; keeps a malformed field in a serialized record from looking valid.
+    local.get $digits i32.eqz if unreachable end
     local.get $negative
     if i64.const 0 local.get $value i64.sub local.set $value end
     local.get $value i64.const -2147483648 i64.lt_s
@@ -55,7 +59,7 @@
 
   (func $__deser_dec (result i32)
     (local $negative i32) (local $whole i64) (local $frac i64)
-    (local $places i32) (local $c i32) (local $scaled i64)
+    (local $places i32) (local $c i32) (local $scaled i64) (local $digits i32)
     call $__deser_ws
     call $__deser_peek i32.const 45 i32.eq
     if i32.const 1 local.set $negative call $__deser_get drop end
@@ -63,6 +67,7 @@
       call $__deser_peek local.tee $c i32.const 48 i32.lt_s br_if $whole_done
       local.get $c i32.const 57 i32.gt_s br_if $whole_done
       call $__deser_get drop
+      local.get $digits i32.const 1 i32.add local.set $digits
       local.get $whole i64.const 10 i64.mul
       local.get $c i32.const 48 i32.sub i64.extend_i32_u i64.add local.set $whole
       br $whole_digits
@@ -74,6 +79,7 @@
         call $__deser_peek local.tee $c i32.const 48 i32.lt_s br_if $frac_done
         local.get $c i32.const 57 i32.gt_s br_if $frac_done
         call $__deser_get drop
+        local.get $digits i32.const 1 i32.add local.set $digits
         local.get $places i32.const __DEC_DIGITS__ i32.lt_u
         if
           local.get $frac i64.const 10 i64.mul
@@ -83,6 +89,9 @@
         br $frac_digits
       end end
     end
+    ;; A decimal also needs at least one digit.  Without this guard an empty
+    ;; token would be accepted as 0.0, which is silent data corruption.
+    local.get $digits i32.eqz if unreachable end
     block $pad_done loop $pad
       local.get $places i32.const __DEC_DIGITS__ i32.ge_u br_if $pad_done
       local.get $frac i64.const 10 i64.mul local.set $frac

@@ -44,7 +44,8 @@ The usual collection convention is **data last**, so calls compose through
 ```
 
 `get`, `pop-val!`, `first`, and `last` require a valid value. When an index or
-input length is dynamic, check it with `in-bounds?` or use `Vector/get*`.
+input length is dynamic, check it with `in-bounds?` or use `Vector/get*`,
+which returns `(Option T)`.
 
 ## Core language operations
 
@@ -82,10 +83,13 @@ The unnamespaced functional collection surface is in `lisp/fp.lisp`:
   `unique/char`, `pairwise`, `map/adjacent`, `map/tuple`, `map/fst`, `map/snd`,
   `resolve/option`, `autocorrect`, `match?`, `cartesian-product`, and
   `neighborhood`.
+- Safe lookup: `get*`, `at*`, and `find*`. They return `(Option T)`; match on
+  `None` and `(Some value)` rather than using a sentinel value.
 
 The `Vector/*` namespace supplies regular versions and lower-level helpers:
 `Vector/new`, `Vector/of`, `Vector/first`, `Vector/last`, `Vector/at!`,
-`Vector/get*`, `Vector/get-unsafe`, `Vector/in-bounds?`, `Vector/set!`,
+`Vector/get*`, `Vector/at*`, `Vector/find*`, `Vector/get-unsafe`,
+`Vector/in-bounds?`, `Vector/set!`,
 `Vector/push!`, `Vector/pop!`, `Vector/pull!`, `Vector/append!`,
 `Vector/concat`, `Vector/cons`, `Vector/reverse!`, `Vector/sort!`, and
 `Vector/swap!`. Names ending in `/raw` are implementation-level variants;

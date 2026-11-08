@@ -1,6 +1,7 @@
 # Enums and matching
 
-An `enum` declares a closed set of zero-payload values:
+An `enum` declares a closed set of variants. A zero-payload enum is the most
+compact form:
 
 ```que
 (enum Shape Rock Paper Scissors)
@@ -77,5 +78,105 @@ compared directly—there is no conversion to a string:
 (Table/set! Paper 2 points)
 ```
 
-Current enums have no payload variants. `match/string` remains available for
-the older string-dispatch macro use case.
+## Payload and recursive variants
+
+A parenthesized variant declares named payload fields. This is how to model
+trees, linked values, ASTs, and other recursive data:
+
+```que
+(enum Tree
+  Empty
+  (Node value Int left Tree right Tree))
+
+(let tree (Node 4 (Node 2 Empty Empty) (Node 7 Empty Empty)))
+
+(letrec size
+  (lambda (tree)
+    (match tree
+      Empty 0
+      (Node value left right)
+        (+ 1 (+ (size left) (size right))))))
+
+(size tree) ; 3
+```
+
+The payload binding count must match the variant declaration. Payload enums
+are boxed and reference-counted; plain zero-payload enums remain immediate
+`i32` tags. Recursive *types* are therefore fine, but managed ownership
+cycles are not: a tree may own its children, while a cycle such as `a → b → a`
+is rejected by Calque's RC-cycle checks.
+
+`=~` remains useful for zero-payload state enums. It is not structural payload
+equality; use `match` to inspect a payload variant.
+
+### Parameterized enums
+
+Payload enums can also take type parameters. This makes the type relationship
+between a payload and its enclosing variant explicit without giving up
+exhaustive matching. The standard library defines this common type already:
+
+```que
+(let read-or
+  (lambda (fallback option)
+    (match option
+      None fallback
+      (Some value) value)))
+
+{(read-or 0 (Some 4))
+ (read-or "none" (Some "Calque"))}
+; {4 "Calque"}
+```
+
+Use the applied form in annotations: `(Option Int)`, `(Option [Char])`, or a
+generic relationship such as `(Option T)`. Recursive generic enums work the
+same way:
+
+```que
+(enum Tree T
+  Empty
+  (Node value T left (Tree T) right (Tree T)))
+```
+
+Every use chooses one payload type. `(Some 1)` and `(Some "one")` can coexist
+in a program, but they have different types: `(Option Int)` and
+`(Option [Char])`.
+
+Payload enums are also valid `Table` keys. Their tag and fields are hashed and
+compared structurally, including nested payload enums, vectors, tuples, and
+records:
+
+```que
+(let table (Table/new))
+(Table/set! (Node 1 Empty Empty) "stored" table)
+(Table/get (Node 1 Empty Empty) table)
+```
+
+The same rule applies to a payload such as `(Named ["calque" "lisp"])`: a
+separately allocated value with the same nested text is the same key. Tuples
+and records can also be used directly as structural `Table` keys.
+
+Like existing `[Char]` keys, do not mutate a managed value after using it as a
+key: changing its contents can change its hash and make it unreachable in the
+table.
+
+## Serialize payload enums
+
+Payload enums use an explicit, readable recursive format. `serialize` writes
+the enum type, variant, and each field; `deserialize` validates that exact
+shape against the concrete type supplied by `sig`:
+
+```que
+(enum Tree T Empty (Node value T left (Tree T) right (Tree T)))
+
+(let saved (serialize (Node 4 Empty Empty)))
+; Tree{ Node 4 Tree{ Empty } Tree{ Empty } }
+
+(sig restored (Tree Int))
+(let restored (deserialize saved))
+```
+
+Malformed text, an unknown variant, or a missing field is an error. Recursive
+payloads are decoded recursively, so this format also round-trips ordinary
+trees and ASTs without a separate schema.
+
+`match/string` remains available for the older string-dispatch macro use case.

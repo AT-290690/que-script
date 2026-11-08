@@ -120,6 +120,20 @@
 
 (let in-bounds? (lambda index xs (and (< index (length xs)) (>= index 0))))
 
+; Checked collection access uses the standard `(Option T)` type. `at*` keeps
+; `at`'s negative-index convention while making an out-of-range result
+; explicit instead of trapping.
+(let get* (lambda (index xs)
+  (if (in-bounds? index xs)
+      (Some (get index xs))
+      None)))
+
+(let at* (lambda (index xs)
+  (let normalized (if (< index 0) (+ (length xs) index) index))
+  (if (in-bounds? normalized xs)
+      (Some (get normalized xs))
+      None)))
+
 (let range (lambda start end (do
      (let out [ start ])
      (mut i (+ start 1))
@@ -1010,6 +1024,14 @@ out)))
               (alter! i (+ i 1))))
      index)))
 
+; `find` keeps its compact index-or--1 result for hot loops. `find*` is the
+; typed alternative for ordinary code where absence should be explicit.
+(let find* (lambda (fn? xs)
+  (let index (find fn? xs))
+  (if (>= index 0)
+      (Some index)
+      None)))
+
 (let partition (lambda n xs (if (= n (length xs)) [xs] (do
     (let a [])
     (mut i 0)
@@ -1047,7 +1069,7 @@ out)))
 
 (let points (lambda fn? matrix (do
    (let coords [])
-   (Matrix/for/i (lambda cell y x (if (fn? cell) (do (Vector/push! [ y x ] coords) nil))) matrix)
+   (Matrix/for/i (lambda cell y x (if (fn? cell) (do (push! [ y x ] coords) nil))) matrix)
     coords)))
 
 (let flat-map (lambda fn xs (flat (map fn xs))))

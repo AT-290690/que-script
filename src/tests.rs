@@ -111,6 +111,52 @@ xs)"#,
     }
 
     #[test]
+    fn test_payload_enum_supports_recursive_construction_and_match_bindings() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (let tree (Node 4 (Node 2 Empty Empty) (Node 7 Empty Empty)))
+            (letrec size
+              (lambda (tree)
+                (match tree
+                  Empty 0
+                  (Node value left right) (+ 1 (+ (size left) (size right))))))
+            (size tree))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "3");
+    }
+
+    #[test]
+    fn test_payload_enum_match_requires_correct_binding_arity() {
+        let exprs = crate::parser::parse(
+            "(do (enum Maybe None (Some value Int)) (match (Some 1) None 0 (Some) 1))",
+        )
+        .unwrap();
+        let err = crate::infer::infer_with_builtins_typed(
+            exprs.first().expect("payload enum program should parse"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("wrong match binding arity must fail");
+        assert!(err.contains("needs 1 bindings, got 0"), "{err}");
+    }
+
+    #[test]
+    fn test_payload_enum_equality_compares_tags_for_both_operands() {
+        let source = r#"(do
+            (enum Choice Zero (A value Int) (B value Int) Other)
+            [
+              (=~ Zero Zero) (=~ Zero (A 1)) (=~ Zero (B 2)) (=~ Zero Other)
+              (=~ (A 1) Zero) (=~ (A 1) (A 1)) (=~ (A 1) (B 2)) (=~ (A 1) Other)
+              (=~ (B 2) Zero) (=~ (B 2) (A 1)) (=~ (B 2) (B 2)) (=~ (B 2) Other)
+              (=~ Other Zero) (=~ Other (A 1)) (=~ Other (B 2)) (=~ Other Other)
+            ])"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "[true false false false false true false false false false true false false false false true]"
+        );
+    }
+
+    #[test]
     fn test_enum_match_requires_exhaustive_variants() {
         let exprs = crate::parser::parse("(do (enum Letter A B C) (match A A 1 B 2))").unwrap();
         let err = crate::infer::infer_with_builtins_typed(
@@ -133,6 +179,643 @@ xs)"#,
         )
         .expect_err("enum tag must not be accepted as an Int");
         assert!(err.contains("expected Int but got Letter"), "{err}");
+    }
+
+    #[test]
+    fn test_record_is_nominal_and_supports_typed_construction_and_access() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let point (Point 3 4))
+            (+ (Point/x point) (Point/y point)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+
+        let raw_tuple =
+            crate::parser::parse("(do (record Point x Int y Int) (Point/x (tuple 3 4)))")
+                .expect("record mismatch program should parse");
+        let err = crate::infer::infer_with_builtins_typed(
+            raw_tuple
+                .first()
+                .expect("program should have a root expression"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("a raw tuple must not be accepted as a nominal record");
+        assert!(err.contains("expected Point but got {Int Int}"), "{err}");
+    }
+
+    #[test]
+    fn test_wasi_result_renderer_serializes_packed_scalar_record_vectors() {
+        let source = r#"(do
+            (record Point y Int x Int)
+            [(Point 0 2) (Point 0 3) (Point 1 2)])"#;
+        assert_eq!(
+            run_program_output(source),
+            "[Point{ y 0 x 2 } Point{ y 0 x 3 } Point{ y 1 x 2 }]"
+        );
+    }
+
+    #[test]
+    fn test_record_and_payload_enum_runtime_use_single_inline_allocation() {
+        let expr = crate::parser::build(
+            r#"(do
+                (record Point x Int label [Char])
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (Node (Point 3 "root") Empty Empty))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("record program should compile");
+
+        let record_start = wat
+            .find("  (func $record_new_i32")
+            .expect("record runtime should be present");
+        let enum_start = wat
+            .find("  (func $enum_new_i32")
+            .expect("payload-enum runtime should be present");
+        let vec_start = wat
+            .find("  (func $vec_get_i32")
+            .expect("vector runtime should follow record runtime");
+        let record_runtime = &wat[record_start..enum_start];
+        let enum_runtime = &wat[enum_start..vec_start];
+
+        assert_eq!(
+            record_runtime.matches("call $alloc").count(),
+            1,
+            "records should allocate header, fields, and ref bitmap together:\n{record_runtime}"
+        );
+        assert_eq!(
+            enum_runtime.matches("call $alloc").count(),
+            1,
+            "payload enums should allocate header, fields, and ref bitmap together:\n{enum_runtime}"
+        );
+        wat::parse_str(&wat).expect("compact record module should encode");
+    }
+
+    #[test]
+    fn test_parameterized_records_and_enums_infer_independent_instantiations() {
+        let source = r#"(do
+            (record Pair T K first T second K)
+            (enum Result T E (Ok value T) (Err error E))
+            (let ints (Some 7))
+            (let text (Some "calque"))
+            (let pair (Pair ints text))
+            (let failure (Err "no"))
+            (+ (match (Pair/first pair)
+                 None 0
+                 (Some value) value)
+               (match failure
+                 (Ok value) 0
+                 (Err error) (length error))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "9");
+
+        let mixed = r#"(do
+            (enum Option T None (Some value T))
+            [(Some 1) (Some "not-an-int")])"#;
+        let expr = crate::parser::build(mixed).expect("generic mismatch program should build");
+        let err = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect_err("distinct Option instantiations must not unify");
+        assert!(
+            err.contains("Vector element 2") && err.contains("Int") && err.contains("[Char]"),
+            "unexpected generic mismatch: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parameterized_recursive_enum_and_rigid_signature() {
+        let source = r#"(do
+            (enum Tree T
+              Empty
+              (Node value T left (Tree T) right (Tree T)))
+            (sig count ((Tree T) -> Int))
+            (let count
+              (lambda (tree)
+                (match tree
+                  Empty 0
+                  (Node _ _ _) 1)))
+            (let tree (Node 8 (Node 3 Empty Empty) Empty))
+            (count tree))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+
+        let expr = crate::parser::build(source).expect("generic tree program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("generic tree program should compile");
+        wat::parse_str(&wat).expect("generic tree module should encode");
+    }
+
+    #[test]
+    fn test_parameterized_adt_helpers_and_serde_are_polymorphic_and_safe() {
+        // Constructors and accessors used as values are emitted once per
+        // nominal declaration.  Exercise scalar and managed instantiations in
+        // the same program so their erased helper ownership map cannot be
+        // accidentally specialized to whichever call happens to come first.
+        let helpers = r#"(do
+            (record Box T value T)
+            (let box Box)
+            (let unbox Box/value)
+            (let some Some)
+            (+ (unbox (box 4))
+               (+ (length (unbox (box "managed")))
+                  (length (match (some "text")
+                            None ""
+                            (Some value) value)))) )"#;
+        assert_std_program_output_matches_with_and_without_optimizer(helpers);
+        assert_eq!(
+            run_program_output_with_std_and_opts(helpers, true),
+            "15"
+        );
+
+        let serde = r#"(do
+            (record Pair T K first T second K)
+            (enum Tree T Empty (Node value T left (Tree T) right (Tree T)))
+            (let pair-text (serialize (Pair 3 "Calque")))
+            (sig pair (Pair Int [Char]))
+            (let pair (deserialize pair-text))
+            (let tree-text (serialize (Node 4 Empty Empty)))
+            (sig tree (Tree Int))
+            (let tree (deserialize tree-text))
+            (match tree
+              Empty 0
+              (Node value left right) (+ (Pair/first pair) value)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(serde);
+        assert_eq!(run_program_output_with_std_and_opts(serde, true), "7");
+    }
+
+    #[test]
+    fn test_lsp_source_fallback_understands_parameterized_enum_headers() {
+        let source = r#"(enum Option T None (Some value T))"#;
+        assert_eq!(
+            crate::lsp_native_core::enum_variant_type_in_source(source, "None"),
+            Some("(Option T)".to_string())
+        );
+        assert_eq!(
+            crate::lsp_native_core::enum_variant_type_in_source(source, "Some"),
+            Some("T -> (Option T)".to_string())
+        );
+        assert_eq!(
+            crate::lsp_native_core::payload_enum_constructor_signatures_in_source(source),
+            vec![("Some".to_string(), "T -> (Option T)".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_scalar_record_vectors_store_fields_inline_and_preserve_vector_operations() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let points [])
+            (capacity! 4 points)
+            (push! (Point 1 2) points)
+            (push! (Point 3 4) points)
+            (set! 0 (Point 5 6) points)
+            (let point (get 0 points))
+            {(Point/x point) (Point/y point) (length points)})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 5 { 6 2 } }"
+        );
+
+        let expr = crate::parser::build(source).expect("packed-record program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("packed-record program should compile");
+        assert!(
+            wat.contains("$vec_new_packed_record_i32"),
+            "scalar record vectors should use inline array-of-struct storage:\n{wat}"
+        );
+        assert!(
+            wat.contains("call $vec_prepare_packed_record_set_i32"),
+            "direct record constructors stored in packed vectors must reserve an inline slot before writing their fields:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("packed-record module should encode");
+    }
+
+    #[test]
+    fn test_scalar_record_vector_fusion_falls_back_for_generic_vector_builders() {
+        // `Vector/new` currently uses the general vector builder.  Accessor
+        // fusion must therefore preserve the ordinary record-vector path as
+        // well as the inline packed representation.
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let points (Vector/new (lambda (i) (Point i (+ i 1))) 2))
+            (let point (get 1 points))
+            {(Point/x point) (Point/y point)})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 1 2 }"
+        );
+
+        let wat = compile_std_program_to_wat(source, true);
+        assert!(
+            wat.contains("i32.const 1447380021") && wat.contains("call $vec_get_i32"),
+            "record accessor fusion should select packed versus ordinary storage at runtime:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("generic record-vector module should encode");
+    }
+
+    #[test]
+    fn test_packed_record_vector_runtime_is_omitted_without_scalar_record_vectors() {
+        let plain_source = r#"(do
+            (let xs [])
+            (push! 1 xs)
+            (get 0 xs))"#;
+        let plain_wat = compile_std_program_to_wat(plain_source, true);
+        assert!(
+            !plain_wat.contains("$vec_new_packed_record_i32")
+                && !plain_wat.contains("1447380021"),
+            "ordinary programs should not carry the packed record-vector runtime:\n{plain_wat}"
+        );
+        wat::parse_str(&plain_wat).expect("ordinary vector module should encode");
+
+        let record_without_vector = r#"(do
+            (record Point x Int y Int)
+            (let point (Point 3 4))
+            (+ (Point/x point) (Point/y point)))"#;
+        let record_wat = compile_std_program_to_wat(record_without_vector, true);
+        assert!(
+            !record_wat.contains("$vec_new_packed_record_i32"),
+            "a scalar record alone should not enable the packed vector runtime:\n{record_wat}"
+        );
+        wat::parse_str(&record_wat).expect("record-only module should encode");
+    }
+
+    #[test]
+    fn test_optimized_scalar_record_projections_elide_the_record_allocation() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let sum-point
+              (lambda (x y)
+                (let point (Point x y))
+                (+ (Point/x point) (Point/y point))))
+            (sum-point 3 4))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("optimized record projection program should compile");
+        assert_eq!(
+            wat.matches("call $record_new_i32").count(),
+            0,
+            "a scalar record used only by its accessors should stay in locals:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("scalar-replaced record module should encode");
+    }
+
+    #[test]
+    fn test_scalar_record_replacement_preserves_field_effect_order_and_keeps_managed_records() {
+        let scalar_source = r#"(do
+            (record Point x Int y Int)
+            (let seen [])
+            (let mark (lambda (n) (push! n seen) n))
+            (let point (Point (mark 3) (mark 4)))
+            {(Point/x point) seen})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(scalar_source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(scalar_source, true),
+            "{ 3 [3 4] }"
+        );
+
+        let scalar_expr = crate::parser::build(scalar_source).expect("program should build");
+        let scalar_wat = crate::wat::compile_program_to_wat_with_opts(&scalar_expr, true)
+            .expect("optimized scalar record program should compile");
+        assert!(
+            scalar_wat.contains("call $record_new_i32"),
+            "effectful scalar fields must retain their source evaluation order:\n{scalar_wat}"
+        );
+
+        let managed_source = r#"(do
+            (record Label text [Char])
+            (let label (Label "calque"))
+            (Label/text label))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(managed_source);
+        let managed_expr = crate::parser::build(managed_source).expect("program should build");
+        let managed_wat = crate::wat::compile_program_to_wat_with_opts(&managed_expr, true)
+            .expect("managed record program should compile");
+        assert!(
+            managed_wat.contains("call $record_new_i32"),
+            "managed fields must retain normal record ownership semantics:\n{managed_wat}"
+        );
+
+        let trapping_source = r#"(do
+            (record Point x Int y Int)
+            (let xs [1])
+            (let point (Point 1 (get 4 xs)))
+            (Point/x point))"#;
+        let trapping_expr = crate::parser::build(trapping_source).expect("program should build");
+        let trapping_wat = crate::wat::compile_program_to_wat_with_opts(&trapping_expr, true)
+            .expect("trapping record program should compile");
+        assert!(
+            trapping_wat.contains("call $record_new_i32"),
+            "a potentially trapping field must not be discarded:\n{trapping_wat}"
+        );
+    }
+
+    #[test]
+    fn test_optimized_immediate_scalar_payload_match_elides_enum_allocation() {
+        let source = r#"(do
+            (enum Choice Other (Pair left Int right Int))
+            (let seen [])
+            (let mark (lambda (n) (push! n seen) n))
+            (match (Pair (mark 3) (mark 4))
+              Other {0 seen}
+              (Pair left right) {(+ left right) seen}))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 7 [3 4] }"
+        );
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
+            .expect("optimized immediate match should compile");
+        assert_eq!(
+            wat.matches("call $enum_new_i32").count(),
+            0,
+            "a scalar payload enum matched immediately should stay in locals:\n{wat}"
+        );
+
+        let managed_source = r#"(do
+            (enum Message Empty (Text contents [Char]))
+            (match (Text "hello")
+              Empty 0
+              (Text contents) (length contents)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(managed_source);
+        let managed_expr = crate::parser::build(managed_source).expect("program should build");
+        let managed_wat = crate::wat::compile_program_to_wat_with_opts(&managed_expr, true)
+            .expect("managed immediate match should compile");
+        assert!(
+            managed_wat.contains("call $enum_new_i32"),
+            "managed enum payloads must retain normal ownership semantics:\n{managed_wat}"
+        );
+    }
+
+    #[test]
+    fn test_record_cannot_shadow_a_builtin_type_name() {
+        let exprs = crate::parser::parse("(record Int value Int)").expect("record should parse");
+        let err = crate::infer::infer_with_builtins_typed(
+            exprs
+                .first()
+                .expect("program should have a root expression"),
+            crate::types::create_builtin_environment(crate::types::TypeEnv::new()),
+        )
+        .expect_err("record must not shadow Int");
+        assert!(
+            err.contains("record 'Int' conflicts with the built-in type name"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_record_constructor_and_accessor_work_in_lambdas_and_vectors() {
+        let source = r#"(do
+            (record Node hash Int value Int left Int right Int)
+            (let make (lambda (x) (Node x (+ x 1) -1 -1)))
+            (let nodes [(make 3) (make 8)])
+            (let node (get 1 nodes))
+            (+ (Node/hash node) (Node/value node)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "17");
+    }
+
+    #[test]
+    fn test_record_constructor_and_accessor_are_first_class_and_curried() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (record Factory make (Int -> Int -> Point))
+            (let make Point)
+            (let get-x Point/x)
+            (let make-x (make 4))
+            (let makers [Point])
+            (let accessors [get-x])
+            (let factory (Factory Point))
+            (+ ((get 0 accessors) (make-x 9))
+               (Point/y ((get 0 makers) 3 8))
+               (Point/x ((Factory/make factory) 2 7))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "14");
+    }
+
+    #[test]
+    fn test_record_destructuring_uses_declared_field_accessors() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let point (Point 3 4))
+            (let (Point x y) point)
+            (+ x y))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_record_destructuring_can_alias_fields_that_collide_with_globals() {
+        let source = r#"(do
+            (record Pair first Int second Int)
+            (let pair (Pair 3 4))
+            (let (Pair (first left) (second right)) pair)
+            (+ left right))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_record_owns_mixed_scalar_and_managed_fields() {
+        let source = r#"(do
+            (record Message title [Char] tags [[Char]] count Int)
+            (let title "calque")
+            (let message (Message title ["typed" "lisp"] 2))
+            (+ (length (Message/title message))
+               (length (get 0 (Message/tags message)))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "11");
+    }
+
+    #[test]
+    fn test_record_managed_field_accessor_survives_temporary_owner_cleanup() {
+        let source = r#"(do
+            (record Label text [Char])
+            (let labels [(Label "first") (Label "second")])
+            (Label/text (get 1 labels)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "second");
+    }
+
+    #[test]
+    fn test_wat_managed_record_wrapper_summaries_avoid_caller_retain_churn() {
+        let source = r#"(do
+            (record Label text [Char])
+            (let make-label (lambda (text) (Label text)))
+            (let text-of (lambda (label) (Label/text label)))
+            (let label (make-label "hello"))
+            (let text (text-of label))
+            (length text))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "5");
+
+        let expr = crate::parser::build(source).expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("program should compile");
+        let main_start = wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let main = &wat[main_start..];
+        assert!(
+            !main.contains("call $rc_retain_vec"),
+            "calls returning a fresh record or owned record field should transfer ownership to the destination local:\n{main}"
+        );
+
+        let enum_source = r#"(do
+            (enum Message Empty (Text contents [Char]))
+            (let make-text (lambda (contents) (Text contents)))
+            (let message (make-text "hello"))
+            (match message
+              Empty 0
+              (Text contents) (length contents)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(enum_source);
+        let enum_expr = crate::parser::build(enum_source).expect("program should build");
+        let enum_wat = crate::wat::compile_program_to_wat_with_opts(&enum_expr, false)
+            .expect("program should compile");
+        let enum_main_start = enum_wat
+            .find("(func (export \"main\")")
+            .expect("main export should exist");
+        let enum_main = &enum_wat[enum_main_start..];
+        assert!(
+            !enum_main.contains("call $rc_retain_vec"),
+            "a wrapper returning a fresh payload enum should transfer ownership to its destination local:\n{enum_main}"
+        );
+    }
+
+    #[test]
+    fn test_record_can_own_function_field() {
+        let source = r#"(do
+            (record Callback run (Int -> Int))
+            (let callback (Callback (lambda (x) (+ x 1))))
+            ((Callback/run callback) 4))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "5");
+    }
+
+    #[test]
+    fn test_record_closure_field_cannot_form_a_managed_cycle() {
+        let program = r#"(do
+            (record Holder callback (Int -> Int))
+            (let xs [])
+            (let callback (lambda (n) (length xs)))
+            (push! (Holder callback) xs)
+            0)"#;
+        let std_ast = crate::baked::load_ast();
+        let wrapped = match std_ast {
+            crate::parser::Expression::Apply(items) => {
+                crate::parser::merge_std_and_program(program, items[1..].to_vec())
+                    .expect("program should merge with std")
+            }
+            _ => panic!("std ast should be (do ...)"),
+        };
+        let err = crate::wat::compile_program_to_wat(&wrapped)
+            .expect_err("record-mediated RC cycle should fail at compile time");
+        assert!(
+            err.contains("compile-time RC cycle check") && err.contains("set!"),
+            "expected record-mediated RC cycle error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_record_names_are_available_in_signatures() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (sig shift (Point -> Point))
+            (let shift (lambda (point) (Point (+ (Point/x point) 1) (Point/y point))))
+            (shift (Point 4 9)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "Point{ x 5 y 9}"
+        );
+    }
+
+    #[test]
+    fn test_record_serialization_round_trip() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (let saved (serialize (Point 3 4)))
+            (sig restored Point)
+            (let restored (deserialize saved))
+            (+ (Point/x restored) (Point/y restored)))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_recursive_payload_enum_serialization_round_trip() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (let saved (serialize (Node 4 (Node 2 Empty Empty) Empty)))
+            (sig restored Tree)
+            (let restored (deserialize saved))
+            (match restored
+              Empty 0
+              (Node value left right)
+                (match left
+                  Empty 0
+                  (Node left-value left-left left-right) (+ value left-value))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "6");
+    }
+
+    #[test]
+    fn test_wasi_deserialize_rejects_missing_payload_enum_fields() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (sig tree Tree)
+            (let tree (deserialize "Tree{ Node 4 Tree{ Empty } }"))
+            tree)"#;
+        let error = run_program_error_with_debug_guards(source);
+        assert!(
+            !error.is_empty(),
+            "a payload enum with missing fields must trap rather than invent a value"
+        );
+    }
+
+    #[test]
+    fn test_record_managed_field_serialization_round_trip() {
+        let source = r#"(do
+            (record Person name [Char] tags [[Char]])
+            (let saved (serialize (Person "Ada" ["math" "logic"])))
+            (sig restored Person)
+            (let restored (deserialize saved))
+            (+ (length (Person/name restored))
+               (length (get 1 (Person/tags restored)))))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "8");
+    }
+
+    #[test]
+    fn test_wasi_deserialize_rejects_missing_record_integer_fields() {
+        let source = r#"(do
+            (record Point x Int y Int)
+            (sig point Point)
+            (let point (deserialize "Point{ x  y }"))
+            (Point/x point))"#;
+        let error = run_program_error_with_debug_guards(source);
+        assert!(
+            !error.is_empty(),
+            "missing integer field must trap rather than deserialize as zero"
+        );
+    }
+
+    #[test]
+    fn test_wasi_deserialize_rejects_an_empty_decimal() {
+        let source = r#"(do
+            (sig value Dec)
+            (let value (deserialize ""))
+            value)"#;
+        let error = run_program_error_with_debug_guards(source);
+        assert!(
+            !error.is_empty(),
+            "an empty decimal must trap rather than deserialize as zero"
+        );
     }
 
     #[test]
@@ -245,6 +928,82 @@ xs)"#,
             (snd (get 0 (Table/get A points))))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "1");
+    }
+
+    #[test]
+    fn test_table_uses_structural_payload_enum_keys() {
+        let source = r#"(do
+            (enum Tree Empty (Node value Int left Tree right Tree))
+            (let table (Table/new))
+            (Table/set! (Node 1 (Node 2 Empty Empty) Empty) 7 table)
+            {
+              (Table/has? (Node 1 (Node 2 Empty Empty) Empty) table)
+              (Table/has? (Node 1 (Node 3 Empty Empty) Empty) table)
+              (snd (get 0 (Table/get (Node 1 (Node 2 Empty Empty) Empty) table)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ true { false 7 } }"
+        );
+    }
+
+    #[test]
+    fn test_table_payload_enum_keys_recurse_through_nested_vectors() {
+        let source = r#"(do
+            (enum Label End (Named words [[Char]]))
+            (let table (Table/new))
+            (Table/set! (Named ["calque" "lisp"]) 7 table)
+            {
+              (Table/has? (Named ["calque" "lisp"]) table)
+              (Table/has? (Named ["calque" "rust"]) table)
+              (snd (get 0 (Table/get (Named ["calque" "lisp"]) table)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ true { false 7 } }"
+        );
+    }
+
+    #[test]
+    fn test_table_payload_enum_keys_recurse_through_records_and_tuples() {
+        let source = r#"(do
+            (record Point x Int label [Char])
+            (enum Marker End (At point Point pair { [Char] Int }))
+            (let table (Table/new))
+            (Table/set! (At (Point 3 "north") {"origin" 9}) 42 table)
+            {
+              (Table/has? (At (Point 3 "north") {"origin" 9}) table)
+              (Table/has? (At (Point 4 "north") {"origin" 9}) table)
+              (Table/has? (At (Point 3 "south") {"origin" 9}) table)
+              (Table/has? (At (Point 3 "north") {"other" 9}) table)
+              (snd (get 0 (Table/get (At (Point 3 "north") {"origin" 9}) table)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ true { false { false { false 42 } } } }"
+        );
+    }
+
+    #[test]
+    fn test_table_accepts_structural_tuple_and_record_keys() {
+        let source = r#"(do
+            (record Point x Int label [Char])
+            (let points (Table/new))
+            (Table/set! (Point 3 "north") 9 points)
+            (let origins (Table/new))
+            (Table/set! {"origin" 0} 4 origins)
+            {
+              (snd (get 0 (Table/get (Point 3 "north") points)))
+              (snd (get 0 (Table/get {"origin" 0} origins)))
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 9 4 }"
+        );
     }
 
     #[test]
@@ -2035,6 +2794,41 @@ xs
             output_with_opts, output_no_opts,
             "optimizer output must match non-optimized output"
         );
+    }
+
+    #[test]
+    fn test_standard_option_lookup_apis_distinguish_present_and_missing_values() {
+        let source = r#"(do
+            (let xs [10 20 30])
+            (let table (Table/new))
+            (Table/set! "answer" 42 table)
+            {
+              (match (get* 1 xs) None -1 (Some value) value)
+              (match (Vector/get* 9 xs) None -1 (Some value) value)
+              (match (at* -1 xs) None -1 (Some value) value)
+              (match (Vector/at* -4 xs) None -1 (Some value) value)
+              (match (find* (lambda (value) (= value 20)) xs) None -1 (Some index) index)
+              (match (Vector/find* (lambda (value) (= value 99)) xs) None -1 (Some index) index)
+              (match (Table/get* "answer" table) None -1 (Some value) value)
+              (match (Table/get* "missing" table) None -1 (Some value) value)
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 20 { -1 { 30 { -1 { 1 { -1 { 42 -1 } } } } } } }"
+        );
+    }
+
+    #[test]
+    fn test_standard_option_type_hint_keeps_enum_for_deserialization() {
+        let source = r#"(do
+            (sig value (Option Int))
+            (let value (deserialize "Option{ Some 3 }"))
+            (match value
+              None 0
+              (Some item) item))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "3");
     }
 
     #[test]
@@ -4230,8 +5024,14 @@ out"#,
       xs)))
 {(fill 4 7) (fill 3 2)}
 "#;
-        assert_eq!(run_program_output_with_std_and_opts(source, false), "{ [7 7 7 7] [2 2 2] }");
-        assert_eq!(run_program_output_with_std_and_opts(source, true), "{ [7 7 7 7] [2 2 2] }");
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, false),
+            "{ [7 7 7 7] [2 2 2] }"
+        );
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ [7 7 7 7] [2 2 2] }"
+        );
 
         let expr = crate::parser::build(source).expect("program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
@@ -6005,6 +6805,63 @@ out"#,
                 .expect("enum variant should have hover contents");
             assert_eq!(contents, "Forward : Direction");
         }
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_reports_payload_constructor_and_pattern_field_types() {
+        let program = "(enum Tree Empty (Node value Int left Tree right Tree))\n(let tree (Node 4 Empty Empty))\n(match tree Empty 0 (Node value left right) value)";
+        for (line, character, expected) in [
+            (1, 6, "tree : Tree"),
+            (1, 12, "Node : Int -> Tree -> Tree -> Tree"),
+            (2, 27, "value : Int"),
+        ] {
+            let hover_json = crate::wasm_api::lsp_hover(program.to_string(), line, character);
+            let hover: serde_json::Value =
+                serde_json::from_str(&hover_json).expect("valid hover JSON");
+            let contents = hover["contents"]
+                .as_str()
+                .expect("payload enum hover contents");
+            assert!(contents.contains(expected), "unexpected hover: {contents}");
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_specializes_generic_constructor_per_occurrence() {
+        // The trailing `Just` pattern is syntax rather than an evaluated
+        // occurrence, so it must not shift the two constructor calls above.
+        let source = r#"(enum Maybe T Nope (Just value T))
+(let a (Just 3))
+(let b (Just "x"))
+{(match a Nope 0 (Just n) n)
+ (match b Nope "" (Just n) n)}"#;
+        for (line, expected) in [
+            (1, "Just : Int -> (Maybe Int)"),
+            (2, "Just : [Char] -> (Maybe [Char])"),
+        ] {
+            let hover: serde_json::Value =
+                serde_json::from_str(&crate::wasm_api::lsp_hover(source.to_string(), line, 10))
+                    .expect("hover should be valid JSON");
+            let contents = hover["contents"]
+                .as_str()
+                .expect("generic constructor should have hover contents");
+            assert_eq!(contents, expected, "wrong hover on line {line}");
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_completions_include_payload_enum_constructor() {
+        let program = "(enum Tree Empty (Node value Int left Tree right Tree))\nNo";
+        let completion_json = crate::wasm_api::lsp_completions_at(program.to_string(), 1, 2);
+        let items: serde_json::Value = serde_json::from_str(&completion_json)
+            .expect("completion response should be valid JSON");
+        let item = items
+            .as_array()
+            .expect("completion response should be an array")
+            .iter()
+            .find(|item| item["label"] == "Node")
+            .expect("payload constructor should be offered as a completion");
+        assert_eq!(item["detail"], "Int -> Tree -> Tree -> Tree");
+        assert_eq!(item["kind"], "function");
     }
 
     #[test]
@@ -8618,6 +9475,81 @@ fn"#;
     }
 
     #[test]
+    fn test_native_guest_serde_specializes_records_and_payload_enums() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _guest_serde = ScopedEnvVar::set("QUE_GUEST_SERDE", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (record Point x Int y Int)
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (let text (serialize (Node (Point 3 4) Empty Empty)))
+                (sig restored Tree)
+                (let restored (deserialize text))
+                (match restored
+                  Empty 0
+                  (Node point left right) (+ (Point/x point) (Point/y point))))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("native guest serde program should compile");
+
+        assert!(!wat.contains("(import \"host\" \"serialize\""), "{wat}");
+        assert!(!wat.contains("(import \"host\" \"deserialize\""), "{wat}");
+        assert!(wat.contains("call $__wasi_serialize_"), "{wat}");
+        assert!(wat.contains("call $__wasi_deserialize_"), "{wat}");
+        assert!(wat.contains("func $__serde_string"), "{wat}");
+        assert!(wat.contains("func $__deser_string"), "{wat}");
+        wat::parse_str(&wat).expect("native guest serde module should encode");
+    }
+
+    #[test]
+    fn test_native_result_renderer_serializes_direct_record_and_payload_enum_return() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _native_result = ScopedEnvVar::set("QUE_NATIVE_RESULT_SERIALIZE", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (record Point x Int y Int)
+                (enum Tree Empty (Node point Point left Tree right Tree))
+                (Node (Point 3 4) Empty Empty))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("native result renderer should compile");
+
+        assert!(wat.contains("local $native_result_value i32"), "{wat}");
+        assert!(wat.contains("call $__wasi_serialize_"), "{wat}");
+        assert!(wat.contains("func $__serde_string"), "{wat}");
+        assert!(!wat.contains("(import \"host\" \"serialize\""), "{wat}");
+        wat::parse_str(&wat).expect("native result renderer module should encode");
+    }
+
+    #[test]
+    fn test_native_result_renderer_emits_string_serializer_for_serialize_result() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _native_result = ScopedEnvVar::set("QUE_NATIVE_RESULT_SERIALIZE", "1");
+        let expr = crate::parser::build(
+            r#"(do
+                (enum Tree Empty (Node value Int left Tree right Tree))
+                (serialize (Node 4 Empty Empty)))"#,
+        )
+        .expect("program should build");
+        let wat = crate::wat::compile_program_to_wat_with_opts(&expr, false)
+            .expect("native serialized-string result should compile");
+
+        assert!(
+            wat.contains("func $__wasi_serialize_5b436861725d"),
+            "native result renderer must emit the [Char] serializer:\n{wat}"
+        );
+        wat::parse_str(&wat).expect("native serialized-string result module should encode");
+    }
+
+    #[test]
     fn test_wasi_start_renders_top_level_result() {
         let _lock = runtime_exec_lock()
             .lock()
@@ -9313,10 +10245,8 @@ fn"#;
               (length out))))
             (run))"#;
         let moved_expr = crate::parser::build(moved_source).expect("program should build");
-        let retained_expr =
-            crate::parser::build(retained_source).expect("program should build");
-        let ambiguous_expr =
-            crate::parser::build(ambiguous_source).expect("program should build");
+        let retained_expr = crate::parser::build(retained_source).expect("program should build");
+        let ambiguous_expr = crate::parser::build(ambiguous_source).expect("program should build");
         let moved_wat = crate::wat::compile_program_to_wat_with_opts(&moved_expr, false)
             .expect("program should compile");
         let retained_wat = crate::wat::compile_program_to_wat_with_opts(&retained_expr, false)
@@ -14223,7 +15153,7 @@ SECRET = SANTA")
   (parse/env .env)))
 
 (let option (Table/get* "PORT" ENV))
-(if (fst option) (get (snd option)) "")"#,
+(match option None "" (Some value) value)"#,
                 "8080",
             ),
 

@@ -3,6 +3,7 @@ use crate::parser::{DecimalLiteral, Expression};
 use crate::types::Type;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Clone, Default)]
 struct WasiOverrides {
@@ -232,6 +233,7 @@ struct StorageSummary {
     value_param: usize,
 }
 
+#[derive(Clone)]
 struct Ctx<'a> {
     fn_sigs: &'a HashMap<String, (Vec<Type>, Type)>,
     fn_ids: &'a HashMap<String, i32>,
@@ -447,24 +449,34 @@ fn emit_table_key_runtime() -> &'static str {
     local.get $cap i32.rem_u
   )
 
-  (func $table_key_hash_vec (param $key i32) (param $cap i32) (result i32)
+  ;; Table's polymorphic library may conservatively allocate a `[Char]` as a
+  ;; reference vector even though another equal string is a scalar vector.
+  ;; Ownership metadata therefore cannot be part of key identity: recurse
+  ;; through every cell, and let the dynamic dispatcher decide whether that
+  ;; particular value is scalar or another managed container.
+  (func $table_key_hash_vec_structural (param $key i32) (param $cap i32) (result i32)
     (local $len i32) (local $data i32) (local $i i32) (local $hash i32)
+    (local $field_hash i32) (local $value i32)
     local.get $cap i32.eqz
     if i32.const 0 return end
+    i32.const 1 local.get $cap call $table_key_hash_scalar local.set $hash
     local.get $key i32.load local.set $len
     local.get $key i32.const 16 i32.add i32.load local.set $data
     block $done loop $items
       local.get $i local.get $len i32.ge_u br_if $done
-      local.get $hash i32.const 131 i32.mul
       local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
-      i32.add local.get $cap i32.rem_u local.set $hash
+      local.set $value
+      local.get $value local.get $cap call $table_key_hash_dynamic
+      local.set $field_hash
+      local.get $hash i32.const 131 i32.mul local.get $field_hash i32.add
+      local.get $cap i32.rem_u local.set $hash
       local.get $i i32.const 1 i32.add local.set $i
       br $items
     end end
     local.get $hash
   )
 
-  (func $table_key_equal_vec (param $left i32) (param $right i32) (result i32)
+  (func $table_key_equal_vec_structural (param $left i32) (param $right i32) (result i32)
     (local $len i32) (local $left_data i32) (local $right_data i32) (local $i i32)
     local.get $left local.get $right i32.eq
     if i32.const 1 return end
@@ -477,9 +489,195 @@ fn emit_table_key_runtime() -> &'static str {
       local.get $i local.get $len i32.ge_u br_if $equal
       local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
       local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
-      i32.ne if i32.const 0 return end
+      call $table_key_equal_dynamic
+      i32.eqz if i32.const 0 return end
       local.get $i i32.const 1 i32.add local.set $i
       br $items
+    end end
+    i32.const 1
+  )
+
+  ;; Records have a fixed vector-shaped payload plus a bitmap saying which
+  ;; fields are managed.  This is shared by ordinary nominal records and by
+  ;; boxed payload enums (the latter add a variant tag at offset 28).
+  (func $table_key_hash_record (param $key i32) (param $cap i32) (result i32)
+    (local $len i32) (local $data i32) (local $ref_map i32)
+    (local $i i32) (local $ref_word i32) (local $hash i32)
+    (local $field_hash i32) (local $value i32)
+    local.get $cap i32.eqz
+    if i32.const 0 return end
+    i32.const 2 local.get $cap call $table_key_hash_scalar local.set $hash
+    local.get $key i32.load local.set $len
+    local.get $key i32.const 16 i32.add i32.load local.set $data
+    local.get $key i32.const 24 i32.add i32.load local.set $ref_map
+    block $done loop $fields
+      local.get $i local.get $len i32.ge_u br_if $done
+      local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $value
+      local.get $ref_map i32.eqz
+      if (result i32)
+        local.get $value local.get $cap call $table_key_hash_scalar
+      else
+        local.get $ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $ref_word
+        local.get $ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if (result i32)
+          local.get $value local.get $cap call $table_key_hash_dynamic
+        else
+          local.get $value local.get $cap call $table_key_hash_scalar
+        end
+      end
+      local.set $field_hash
+      local.get $hash i32.const 131 i32.mul local.get $field_hash i32.add
+      local.get $cap i32.rem_u local.set $hash
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
+    end end
+    local.get $hash
+  )
+
+  (func $table_key_equal_record (param $left i32) (param $right i32) (result i32)
+    (local $len i32) (local $left_data i32) (local $right_data i32)
+    (local $left_ref_map i32) (local $right_ref_map i32) (local $i i32)
+    (local $left_ref_word i32) (local $right_ref_word i32)
+    (local $left_value i32) (local $right_value i32)
+    local.get $left local.get $right i32.eq
+    if i32.const 1 return end
+    local.get $left i32.load local.tee $len
+    local.get $right i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 16 i32.add i32.load local.set $left_data
+    local.get $right i32.const 16 i32.add i32.load local.set $right_data
+    local.get $left i32.const 24 i32.add i32.load local.set $left_ref_map
+    local.get $right i32.const 24 i32.add i32.load local.set $right_ref_map
+    block $equal loop $fields
+      local.get $i local.get $len i32.ge_u br_if $equal
+      local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $left_value
+      local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $right_value
+      local.get $left_ref_map i32.eqz
+      if
+        local.get $right_ref_map i32.eqz
+        if else i32.const 0 return end
+        local.get $left_value local.get $right_value i32.ne
+        if i32.const 0 return end
+      else
+        local.get $left_ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $left_ref_word
+        local.get $right_ref_map i32.eqz
+        if i32.const 0 return end
+        local.get $right_ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $right_ref_word
+        local.get $left_ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        local.get $right_ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        i32.ne if i32.const 0 return end
+        local.get $left_ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if
+          local.get $left_value local.get $right_value call $table_key_equal_dynamic
+          i32.eqz if i32.const 0 return end
+        else
+          local.get $left_value local.get $right_value i32.ne
+          if i32.const 0 return end
+        end
+      end
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
+    end end
+    i32.const 1
+  )
+
+  ;; Boxed payload enums carry their discriminant and a field-reference bitmap
+  ;; in their header. That makes structural table keys possible without a
+  ;; per-language-enum runtime registration: scalar fields compare directly,
+  ;; while managed fields recurse through this same representation dispatch.
+  (func $table_key_hash_enum (param $key i32) (param $cap i32) (result i32)
+    (local $len i32) (local $data i32) (local $ref_map i32)
+    (local $tag i32) (local $i i32) (local $ref_word i32)
+    (local $hash i32) (local $field_hash i32) (local $value i32)
+    local.get $cap i32.eqz
+    if i32.const 0 return end
+    local.get $key i32.load local.set $len
+    local.get $key i32.const 16 i32.add i32.load local.set $data
+    local.get $key i32.const 24 i32.add i32.load local.set $ref_map
+    local.get $key i32.const 28 i32.add i32.load local.set $tag
+    local.get $tag local.get $cap call $table_key_hash_scalar local.set $hash
+    block $done loop $fields
+      local.get $i local.get $len i32.ge_u br_if $done
+      local.get $data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $value
+      local.get $ref_map i32.eqz
+      if (result i32)
+        local.get $value local.get $cap call $table_key_hash_scalar
+      else
+        local.get $ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $ref_word
+        local.get $ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if (result i32)
+          local.get $value local.get $cap call $table_key_hash_dynamic
+        else
+          local.get $value local.get $cap call $table_key_hash_scalar
+        end
+      end
+      local.set $field_hash
+      local.get $hash i32.const 131 i32.mul local.get $field_hash i32.add
+      local.get $cap i32.rem_u local.set $hash
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
+    end end
+    local.get $hash
+  )
+
+  (func $table_key_equal_enum (param $left i32) (param $right i32) (result i32)
+    (local $len i32) (local $left_data i32) (local $right_data i32)
+    (local $ref_map i32) (local $i i32) (local $ref_word i32)
+    (local $left_value i32) (local $right_value i32)
+    local.get $left local.get $right i32.eq
+    if i32.const 1 return end
+    local.get $left i32.load local.tee $len
+    local.get $right i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 28 i32.add i32.load
+    local.get $right i32.const 28 i32.add i32.load i32.ne
+    if i32.const 0 return end
+    local.get $left i32.const 16 i32.add i32.load local.set $left_data
+    local.get $right i32.const 16 i32.add i32.load local.set $right_data
+    local.get $left i32.const 24 i32.add i32.load local.set $ref_map
+    block $equal loop $fields
+      local.get $i local.get $len i32.ge_u br_if $equal
+      local.get $left_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $left_value
+      local.get $right_data local.get $i i32.const 4 i32.mul i32.add i32.load
+      local.set $right_value
+      local.get $ref_map i32.eqz
+      if
+        local.get $left_value local.get $right_value i32.ne
+        if i32.const 0 return end
+      else
+        local.get $ref_map
+        local.get $i i32.const 5 i32.shr_u i32.const 4 i32.mul i32.add
+        i32.load local.set $ref_word
+        local.get $ref_word i32.const 1
+        local.get $i i32.const 31 i32.and i32.shl i32.and
+        if
+          local.get $left_value local.get $right_value call $table_key_equal_dynamic
+          i32.eqz if i32.const 0 return end
+        else
+          local.get $left_value local.get $right_value i32.ne
+          if i32.const 0 return end
+        end
+      end
+      local.get $i i32.const 1 i32.add local.set $i
+      br $fields
     end end
     i32.const 1
   )
@@ -488,25 +686,77 @@ fn emit_table_key_runtime() -> &'static str {
   (func $table_key_hash_dynamic (param $key i32) (param $cap i32) (result i32)
     local.get $key call $is_vec_ptr
     if (result i32)
-      local.get $key local.get $cap call $table_key_hash_vec
+      local.get $key i32.const 20 i32.add i32.load
+      i32.const 1447380020 i32.eq
+      if (result i32)
+        local.get $key local.get $cap call $table_key_hash_enum
+      else
+        local.get $key i32.const 20 i32.add i32.load
+        i32.const 1447380019 i32.eq
+        if (result i32)
+          local.get $key local.get $cap call $table_key_hash_record
+        else
+          local.get $key local.get $cap call $table_key_hash_vec_structural
+        end
+      end
     else
       local.get $key local.get $cap call $table_key_hash_scalar
     end
   )
 
   (func $table_key_equal_dynamic (param $left i32) (param $right i32) (result i32)
+    (local $left_magic i32) (local $right_magic i32)
     local.get $left local.get $right i32.eq
     if i32.const 1 return end
     local.get $left call $is_vec_ptr
     if (result i32)
       local.get $right call $is_vec_ptr
       if (result i32)
-        local.get $left local.get $right call $table_key_equal_vec
+        local.get $left i32.const 20 i32.add i32.load
+        local.set $left_magic
+        local.get $right i32.const 20 i32.add i32.load
+        local.set $right_magic
+        local.get $left_magic i32.const 1447380020 i32.eq
+        if (result i32)
+          local.get $right_magic i32.const 1447380020 i32.eq
+          if (result i32)
+            local.get $left local.get $right call $table_key_equal_enum
+          else
+            i32.const 0
+          end
+        else
+          local.get $left_magic i32.const 1447380019 i32.eq
+          if (result i32)
+            local.get $right_magic i32.const 1447380019 i32.eq
+            if (result i32)
+              local.get $left local.get $right call $table_key_equal_record
+            else
+              i32.const 0
+            end
+          else
+            ;; A non-enum/non-record vector must never compare equal to a
+            ;; record or payload enum merely because its cells happen to line
+            ;; up.
+            local.get $right_magic i32.const 1447380020 i32.eq
+            local.get $right_magic i32.const 1447380019 i32.eq
+            i32.or
+            if (result i32)
+              i32.const 0
+            else
+              local.get $left local.get $right call $table_key_equal_vec_structural
+            end
+          end
+        end
       else
         i32.const 0
       end
     else
-      i32.const 0
+      local.get $right call $is_vec_ptr
+      if (result i32)
+        i32.const 0
+      else
+        local.get $left local.get $right i32.eq
+      end
     end
   )
 "#
@@ -635,6 +885,7 @@ fn is_i32ish_type(t: &Type) -> bool {
             | Type::Unit
             | Type::List(_)
             | Type::Tuple(_)
+            | Type::Record(_)
             | Type::Var(_)
             | Type::Function(_, _)
     )
@@ -643,21 +894,26 @@ fn is_i32ish_type(t: &Type) -> bool {
 fn is_ref_type(t: &Type) -> bool {
     matches!(
         t,
-        Type::List(_) | Type::Tuple(_) | Type::Function(_, _) | Type::Var(_)
-    )
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
+    ) || matches!(t, Type::Enum(enum_type) if enum_type.boxed)
 }
 
 fn is_managed_local_type(t: &Type) -> bool {
     matches!(
         t,
-        Type::List(_) | Type::Tuple(_) | Type::Function(_, _) | Type::Var(_)
-    )
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Function(_, _) | Type::Var(_)
+    ) || matches!(t, Type::Enum(enum_type) if enum_type.boxed)
 }
 
 fn rc_retain_for_type(t: &Type) -> &'static str {
     match t {
-        Type::List(_) | Type::Tuple(_) => "$rc_retain_vec",
-        Type::Function(_, _) => "$closure_retain",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) => "$rc_retain_vec",
+        Type::Enum(enum_type) if enum_type.boxed => "$rc_retain_vec",
+        // A function value can be either a heap closure or a small immediate
+        // function tag (builtins and generated record functions).  The
+        // generic helper recognizes both; calling $closure_retain directly
+        // would interpret a tag as an address.
+        Type::Function(_, _) => "$rc_retain",
         Type::Var(_) => "$rc_retain",
         _ => "$rc_retain",
     }
@@ -665,8 +921,9 @@ fn rc_retain_for_type(t: &Type) -> &'static str {
 
 fn rc_release_for_type(t: &Type) -> &'static str {
     match t {
-        Type::List(_) | Type::Tuple(_) => "$rc_release_vec",
-        Type::Function(_, _) => "$closure_release",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) => "$rc_release_vec",
+        Type::Enum(enum_type) if enum_type.boxed => "$rc_release_vec",
+        Type::Function(_, _) => "$rc_release",
         Type::Var(_) => "$rc_release",
         _ => "$rc_release",
     }
@@ -685,7 +942,8 @@ enum RcKind {
 impl RcKind {
     fn for_type(t: &Type) -> Self {
         match t {
-            Type::List(_) | Type::Tuple(_) => Self::Vector,
+            Type::List(_) | Type::Tuple(_) | Type::Record(_) => Self::Vector,
+            Type::Enum(enum_type) if enum_type.boxed => Self::Vector,
             Type::Function(_, _) | Type::Var(_) => Self::Dynamic,
             _ => Self::Dynamic,
         }
@@ -717,7 +975,8 @@ impl ManagedRefSlot {
 fn closure_store_op_for_type(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "closure_set_fun",
-        Type::List(_) | Type::Var(_) => "closure_set_ref",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Var(_) => "closure_set_ref",
+        Type::Enum(enum_type) if enum_type.boxed => "closure_set_ref",
         _ => "closure_set",
     }
 }
@@ -725,7 +984,8 @@ fn closure_store_op_for_type(t: &Type) -> &'static str {
 fn closure_store_op_for_type_wat(t: &Type) -> &'static str {
     match t {
         Type::Function(_, _) => "$closure_set_fun",
-        Type::List(_) | Type::Var(_) => "$closure_set_ref",
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) | Type::Var(_) => "$closure_set_ref",
+        Type::Enum(enum_type) if enum_type.boxed => "$closure_set_ref",
         _ => "$closure_set",
     }
 }
@@ -756,6 +1016,95 @@ fn vec_set_runtime_for_materialized_scalar(is_scalar: bool) -> &'static str {
 
 fn is_scalar_vector_type(t: &Type) -> bool {
     matches!(t, Type::List(inner) if !is_ref_type(inner))
+}
+
+/// Scalar records can live inline in a vector: each element is its fixed
+/// sequence of i32 fields rather than a pointer to a separately allocated
+/// record. Managed fields deliberately stay on the established vector-of-
+/// references representation because their per-element ownership needs a
+/// bitmap and release path.
+fn packed_scalar_record_vector(t: &Type) -> Option<&crate::types::RecordType> {
+    let Type::List(inner) = t else {
+        return None;
+    };
+    let Type::Record(record) = inner.as_ref() else {
+        return None;
+    };
+    record
+        .fields
+        .iter()
+        .all(|field| !is_ref_type(&field.typ))
+        .then_some(record.as_ref())
+}
+
+/// The packed-record vector runtime is sizeable.  Emit it only for a module
+/// whose lowered program can actually produce one.  Looking through function
+/// and tuple types matters because a concrete `[Point]` can travel through a
+/// helper before it reaches the vector operation that uses the packed path.
+fn type_uses_packed_scalar_record_vector(t: &Type) -> bool {
+    if packed_scalar_record_vector(t).is_some() {
+        return true;
+    }
+    match t {
+        Type::Function(input, output) => {
+            type_uses_packed_scalar_record_vector(input)
+                || type_uses_packed_scalar_record_vector(output)
+        }
+        Type::List(element) => type_uses_packed_scalar_record_vector(element),
+        Type::Tuple(items) => items.iter().any(type_uses_packed_scalar_record_vector),
+        _ => false,
+    }
+}
+
+fn typed_ast_uses_packed_scalar_record_vectors(node: &TypedExpression) -> bool {
+    node.typ
+        .as_ref()
+        .is_some_and(type_uses_packed_scalar_record_vector)
+        || node
+            .children
+            .iter()
+            .any(typed_ast_uses_packed_scalar_record_vectors)
+}
+
+const PACKED_RECORD_RUNTIME_BEGIN: &str = ";; __PACKED_RECORD_RUNTIME_BEGIN__";
+const PACKED_RECORD_RUNTIME_END: &str = ";; __PACKED_RECORD_RUNTIME_END__";
+
+/// Delete optional packed-record sections from a runtime template.  Keeping
+/// the ordinary-vector path around each section intact makes this a strictly
+/// additive representation optimization: a program that does not use
+/// `[ScalarRecord]` gets precisely the established ordinary vector runtime.
+fn select_packed_record_runtime(mut wat: String, enabled: bool) -> String {
+    if enabled {
+        return wat
+            .replace(PACKED_RECORD_RUNTIME_BEGIN, "")
+            .replace(PACKED_RECORD_RUNTIME_END, "");
+    }
+
+    while let Some(start) = wat.find(PACKED_RECORD_RUNTIME_BEGIN) {
+        let content_start = start + PACKED_RECORD_RUNTIME_BEGIN.len();
+        let end_relative = wat[content_start..]
+            .find(PACKED_RECORD_RUNTIME_END)
+            .expect("packed runtime marker must have a matching end marker");
+        let end = content_start + end_relative + PACKED_RECORD_RUNTIME_END.len();
+        wat.replace_range(start..end, "");
+    }
+    wat
+}
+
+/// A direct record constructor can be written straight into a packed vector
+/// slot.  This is deliberately stricter than merely checking the value type:
+/// it only applies to the matching constructor syntax, so the fallback still
+/// handles a record value obtained from a variable, function, or ordinary
+/// vector representation.
+fn packed_record_constructor_for_vector<'a>(
+    vector: &'a TypedExpression,
+    value: &'a TypedExpression,
+) -> Option<&'a crate::types::RecordType> {
+    let vector_record = packed_scalar_record_vector(vector.typ.as_ref()?)?;
+    let value_record = record_constructor_type(value)?;
+    (vector_record.name == value_record.name
+        && vector_record.fields.len() == value_record.fields.len())
+    .then_some(vector_record)
 }
 
 fn expr_is_definitely_materialized_scalar_vector(
@@ -1131,7 +1480,7 @@ fn top_level_borrow_plan(
 fn wasm_val_type(typ: &Type) -> Result<&'static str, String> {
     match typ {
         Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit => Ok("i32"),
-        Type::List(_) | Type::Tuple(_) => Ok("i32"),
+        Type::List(_) | Type::Tuple(_) | Type::Record(_) => Ok("i32"),
         Type::Var(_) => Ok("i32"),
         Type::Function(_, _) => Ok("i32"),
     }
@@ -1153,7 +1502,8 @@ fn vec_elem_kind_from_type(typ: &Type) -> Result<VecElemKind, String> {
         | Type::Enum(_)
         | Type::Unit
         | Type::List(_)
-        | Type::Tuple(_) => Ok(VecElemKind::I32),
+        | Type::Tuple(_)
+        | Type::Record(_) => Ok(VecElemKind::I32),
         Type::Var(_) => Ok(VecElemKind::I32),
         Type::Function(_, _) => Ok(VecElemKind::I32),
     }
@@ -1187,6 +1537,7 @@ fn is_special_word(w: &str) -> bool {
             | "if"
             | "match"
             | "enum"
+            | "record"
             | "sig"
             | "vector"
             | "string"
@@ -1353,12 +1704,25 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
                     }
                     return;
                 }
+                if op == "record" {
+                    return;
+                }
                 if op == "match" {
                     if let Some(value) = items.get(1) {
                         collect_refs(value, bound, out);
                     }
-                    for branch in items.iter().skip(3).step_by(2) {
-                        collect_refs(branch, bound, out);
+                    for pair in items[2..].chunks_exact(2) {
+                        let mut branch_bound = bound.clone();
+                        if let Expression::Apply(pattern) = &pair[0] {
+                            for binding in pattern.iter().skip(1) {
+                                if let Expression::Word(name) = binding {
+                                    if name != "_" {
+                                        branch_bound.insert(name.clone());
+                                    }
+                                }
+                            }
+                        }
+                        collect_refs(&pair[1], &mut branch_bound, out);
                     }
                     return;
                 }
@@ -1387,12 +1751,64 @@ fn collect_refs(expr: &Expression, bound: &mut HashSet<String>, out: &mut HashSe
 /// environment.
 fn collect_enum_variant_words(node: &TypedExpression, out: &mut HashSet<String>) {
     if let (Expression::Word(word), Some(Type::Enum(enum_type))) = (&node.expr, &node.typ) {
-        if enum_type.variants.iter().any(|variant| variant == word) {
+        if enum_type
+            .variants()
+            .iter()
+            .any(|variant| variant.name == *word)
+        {
             out.insert(word.clone());
         }
     }
     for child in &node.children {
         collect_enum_variant_words(child, out);
+    }
+}
+
+/// Record constructors and accessors are compiler-provided names, like enum
+/// variants. They have inferred function types but no runtime closure to
+/// capture when used inside a lambda.
+fn collect_record_generated_words(node: &TypedExpression, out: &mut HashSet<String>) {
+    if let (Expression::Word(word), Some(typ)) = (&node.expr, &node.typ) {
+        let mut current = typ;
+        while let Type::Function(_, result) = current {
+            current = result;
+        }
+        if let Type::Record(record) = current {
+            if word == &record.name {
+                out.insert(word.clone());
+            }
+        }
+        if let Type::Function(input, _) = typ {
+            if let Type::Record(record) = input.as_ref() {
+                if record
+                    .fields
+                    .iter()
+                    .any(|field| word == &format!("{}/{}", record.name, field.name))
+                {
+                    out.insert(word.clone());
+                }
+            }
+        }
+    }
+    for child in &node.children {
+        collect_record_generated_words(child, out);
+    }
+}
+
+fn collect_enum_generated_words(node: &TypedExpression, out: &mut HashSet<String>) {
+    if let (Expression::Word(word), Some(typ)) = (&node.expr, &node.typ) {
+        let mut current = typ;
+        while let Type::Function(_, result) = current {
+            current = result;
+        }
+        if let Type::Enum(enum_type) = current {
+            if enum_type.boxed && enum_type.variant(word).is_some() {
+                out.insert(word.clone());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_enum_generated_words(child, out);
     }
 }
 
@@ -1418,6 +1834,12 @@ fn lambda_free_names(node: &TypedExpression) -> HashSet<String> {
     let mut enum_variants = HashSet::new();
     collect_enum_variant_words(node, &mut enum_variants);
     refs.retain(|name| !enum_variants.contains(name));
+    let mut record_generated = HashSet::new();
+    collect_record_generated_words(node, &mut record_generated);
+    refs.retain(|name| !record_generated.contains(name));
+    let mut enum_generated = HashSet::new();
+    collect_enum_generated_words(node, &mut enum_generated);
+    refs.retain(|name| !enum_generated.contains(name));
     refs
 }
 
@@ -1697,7 +2119,8 @@ fn collect_unique_main_lambda_keys(
         else {
             continue;
         };
-        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(op)) if op == "lambda")) {
+        if !matches!(&rhs.expr, Expression::Apply(xs) if matches!(xs.first(), Some(Expression::Word(op)) if op == "lambda"))
+        {
             continue;
         }
         let key = rhs.expr.to_lisp();
@@ -1786,10 +2209,7 @@ fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
         }),
         // Public aliases are not lowered as core primitives, so they retain
         // their source-level data-last parameter positions.
-        "std/vector/push!"
-        | "std/vector/append!"
-        | "std/vector/push-and-get!"
-        | "Vector/push!"
+        "Vector/push!"
         | "Vector/append!"
         | "Que/push!"
         | "Que/enque!"
@@ -1807,7 +2227,7 @@ fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
             target_param: 0,
             value_param: 2,
         }),
-        "std/vector/set!" | "std/vector/update!" | "Vector/set!" => Some(StorageSummary {
+        "Vector/set!" => Some(StorageSummary {
             target_param: 2,
             value_param: 1,
         }),
@@ -1845,6 +2265,21 @@ fn closure_capture_roots(node: &TypedExpression, env: &RcCycleCheckEnv) -> Optio
                 }
                 if let Some(captured) = env.closure_captures.get(&cap) {
                     roots.extend(captured.iter().cloned());
+                }
+            }
+            Some(roots)
+        }
+        // A record owns every managed field.  Propagating closure captures
+        // through construction lets the existing storage-cycle check reject
+        // `vector -> record -> closure -> vector` cycles too.
+        Expression::Apply(_)
+            if matches!(node.typ.as_ref(), Some(Type::Record(_)))
+                || matches!(node.typ.as_ref(), Some(Type::Enum(enum_type)) if enum_type.boxed) =>
+        {
+            let mut roots = HashSet::new();
+            for field in node.children.iter().skip(1) {
+                if let Some(captures) = closure_capture_roots(field, env) {
+                    roots.extend(captures);
                 }
             }
             Some(roots)
@@ -2285,6 +2720,7 @@ fn emit_vector_runtime(
     fn_sigs: &HashMap<String, (Vec<Type>, Type)>,
     closure_defs: &HashMap<String, ClosureDef>,
     apply_arities: &HashSet<usize>,
+    uses_packed_scalar_record_vectors: bool,
 ) -> String {
     fn parse_env_i32(name: &str, default: i32, min: i32, max: i32) -> i32 {
         std::env::var(name)
@@ -2842,6 +3278,8 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $data i32)
     (local $v i32)
+    (local $ref_map i32)
+    (local $ref_word i32)
     local.get $ptr
     i32.eqz
     if
@@ -2896,6 +3334,104 @@ fn emit_vector_runtime(
       i32.const 0
       return
     end
+    ;; Records and payload enums retain their established header ABI, but their
+    ;; fields and ownership bitmap live inline in the same allocation. Unlike
+    ;; a vector, adjacent record fields may mix scalar and managed values.
+    local.get $magic
+    i32.const 1447380019
+    i32.eq
+    local.get $magic
+    i32.const 1447380020
+    i32.eq
+    i32.or
+    if
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      local.set $data
+      local.get $ptr
+      i32.const 24
+      i32.add
+      i32.load
+      local.set $ref_map
+      local.get $ptr
+      i32.load
+      local.set $len
+      local.get $ref_map
+      i32.eqz
+      if
+      else
+        i32.const 0
+        local.set $i
+        block $record_done
+          loop $record_fields
+            local.get $i
+            local.get $len
+            i32.ge_s
+            br_if $record_done
+            local.get $ref_map
+            local.get $i
+            i32.const 5
+            i32.shr_u
+            i32.const 4
+            i32.mul
+            i32.add
+            i32.load
+            local.set $ref_word
+            local.get $ref_word
+            i32.const 1
+            local.get $i
+            i32.const 31
+            i32.and
+            i32.shl
+            i32.and
+            i32.eqz
+            if
+            else
+              local.get $data
+              local.get $i
+              i32.const 4
+              i32.mul
+              i32.add
+              i32.load
+              call $rc_release
+              drop
+            end
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            br $record_fields
+          end
+        end
+      end
+      local.get $ptr
+      call $free
+      drop
+      i32.const 0
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    ;; Inline scalar-record vectors own only their backing storage. Their
+    ;; cells are raw fields, never independently reference-counted pointers.
+    local.get $magic
+    i32.const 1447380021
+    i32.eq
+    if
+      local.get $ptr
+      i32.const 16
+      i32.add
+      i32.load
+      call $free
+      drop
+      local.get $ptr
+      call $free
+      drop
+      i32.const 0
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     i32.const 12
     i32.add
@@ -3600,9 +4136,77 @@ fn emit_vector_runtime(
       return
     end
     local.get $magic
+    i32.const 1447380019
+    i32.eq
+    local.get $magic
+    i32.const 1447380020
+    i32.eq
+    i32.or
+    if
+      local.get $rc
+      i32.const 0
+      i32.le_s
+      if
+        i32.const 0
+        return
+      end
+      local.get $len
+      i32.const 0
+      i32.lt_s
+      if
+        i32.const 0
+        return
+      end
+      local.get $cap
+      local.get $len
+      i32.ne
+      if
+        i32.const 0
+        return
+      end
+      local.get $elem_ref
+      i32.const 2
+      i32.ne
+      if
+        i32.const 0
+        return
+      end
+      local.get $data
+      i32.const 65536
+      i32.lt_u
+      if
+        i32.const 0
+        return
+      end
+      local.get $data
+      local.get $mem_end
+      i32.ge_u
+      if
+        i32.const 0
+        return
+      end
+      i32.const 1
+      return
+    end
+    local.get $magic
     i32.const 1447380017
     i32.ne
     if
+      ;; __PACKED_RECORD_RUNTIME_BEGIN__
+      local.get $magic
+      i32.const 1447380021
+      i32.eq
+      if
+        local.get $rc i32.const 0 i32.le_s if i32.const 0 return end
+        local.get $len i32.const 0 i32.lt_s if i32.const 0 return end
+        local.get $cap local.get $len i32.lt_s if i32.const 0 return end
+        local.get $elem_ref i32.const 1 i32.lt_s if i32.const 0 return end
+        local.get $data i32.const 65536 i32.lt_u if i32.const 0 return end
+        local.get $data local.get $mem_end i32.ge_u if i32.const 0 return end
+        i32.const 1
+        return
+      end
+      ;; __PACKED_RECORD_RUNTIME_END__
       i32.const 0
       return
     end
@@ -4083,9 +4687,245 @@ fn emit_vector_runtime(
     local.get $ptr
   )
 
+  ;; A record has a fixed header followed by inline fields and a per-field
+  ;; ownership bitmap. This is one allocation, while still letting mixed
+  ;; `{ Int [Char] Bool }` records release only their managed fields.
+  (func $record_new_i32 (param $len i32) (param $ref_words i32) (result i32)
+    (local $ptr i32)
+    (local $data i32)
+    (local $ref_map i32)
+    i32.const 28
+    local.get $len
+    i32.const 4
+    i32.mul
+    i32.add
+    local.get $ref_words
+    i32.const 4
+    i32.mul
+    i32.add
+    call $alloc
+    local.set $ptr
+    local.get $ptr
+    i32.const 28
+    i32.add
+    local.set $data
+    local.get $ref_words
+    i32.eqz
+    if
+      i32.const 0
+      local.set $ref_map
+    else
+      local.get $data
+      local.get $len
+      i32.const 4
+      i32.mul
+      i32.add
+      local.set $ref_map
+    end
+    local.get $ptr
+    local.get $len
+    i32.store
+    local.get $ptr
+    i32.const 4
+    i32.add
+    local.get $len
+    i32.store
+    local.get $ptr
+    i32.const 8
+    i32.add
+    i32.const 1
+    i32.store
+    local.get $ptr
+    i32.const 12
+    i32.add
+    i32.const 2
+    i32.store
+    local.get $ptr
+    i32.const 16
+    i32.add
+    local.get $data
+    i32.store
+    local.get $ptr
+    i32.const 20
+    i32.add
+    i32.const 1447380019
+    i32.store
+    local.get $ptr
+    i32.const 24
+    i32.add
+    local.get $ref_map
+    i32.store
+    local.get $ptr
+  )
+
+  ;; __PACKED_RECORD_RUNTIME_BEGIN__
+  ;; A homogeneous vector of a record whose fields are all scalar stores the
+  ;; fields inline (array-of-structs). Offset 12 is its fixed field count;
+  ;; this magic is intentionally distinct from ordinary scalar vectors.
+  (func $vec_new_packed_record_i32 (param $len i32) (param $fields i32) (result i32)
+    (local $cap i32) (local $ptr i32) (local $data i32)
+    local.get $len i32.const 1 i32.lt_s
+    if (result i32) i32.const 1 else local.get $len end
+    local.set $cap
+    i32.const 24 call $alloc local.set $ptr
+    local.get $cap local.get $fields i32.mul i32.const 4 i32.mul call $alloc local.set $data
+    local.get $ptr local.get $len i32.store
+    local.get $ptr i32.const 4 i32.add local.get $cap i32.store
+    local.get $ptr i32.const 8 i32.add i32.const 1 i32.store
+    local.get $ptr i32.const 12 i32.add local.get $fields i32.store
+    local.get $ptr i32.const 16 i32.add local.get $data i32.store
+    local.get $ptr i32.const 20 i32.add i32.const 1447380021 i32.store
+    local.get $ptr
+  )
+
+  (func $vec_packed_record_addr (param $ptr i32) (param $idx i32) (result i32)
+    local.get $ptr i32.const 16 i32.add i32.load
+    local.get $idx
+    local.get $ptr i32.const 12 i32.add i32.load
+    i32.mul i32.const 4 i32.mul i32.add
+  )
+
+  (func $vec_grow_packed_record_i32 (param $ptr i32) (result i32)
+    (local $cap i32) (local $new_cap i32) (local $len i32)
+    (local $fields i32) (local $old i32) (local $new i32) (local $words i32)
+    local.get $ptr i32.const 4 i32.add i32.load local.set $cap
+    local.get $cap i32.const __VEC_GROWTH_NUM__ i32.mul i32.const __VEC_GROWTH_DEN__ i32.div_s local.set $new_cap
+    local.get $new_cap local.get $cap i32.le_s if local.get $cap i32.const 1 i32.add local.set $new_cap end
+    local.get $new_cap i32.const 1 i32.lt_s if i32.const 1 local.set $new_cap end
+    local.get $ptr i32.load local.set $len
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $ptr i32.const 16 i32.add i32.load local.set $old
+    local.get $new_cap local.get $fields i32.mul local.set $words
+    local.get $words i32.const 4 i32.mul call $alloc local.set $new
+    local.get $new local.get $old local.get $len local.get $fields i32.mul i32.const 4 i32.mul memory.copy
+    local.get $old call $free drop
+    local.get $ptr i32.const 4 i32.add local.get $new_cap i32.store
+    local.get $ptr i32.const 16 i32.add local.get $new i32.store
+    i32.const 0
+  )
+
+  (func $vec_push_packed_record_i32 (param $ptr i32) (param $value i32) (result i32)
+    (local $len i32) (local $cap i32) (local $fields i32) (local $dst i32) (local $src i32)
+    local.get $ptr i32.load local.set $len
+    local.get $ptr i32.const 4 i32.add i32.load local.set $cap
+    local.get $len local.get $cap i32.lt_s i32.eqz if local.get $ptr call $vec_grow_packed_record_i32 drop end
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $ptr local.get $len call $vec_packed_record_addr local.set $dst
+    local.get $value i32.const 16 i32.add i32.load local.set $src
+    local.get $dst local.get $src local.get $fields i32.const 4 i32.mul memory.copy
+    local.get $ptr local.get $len i32.const 1 i32.add i32.store
+    i32.const 0
+  )
+
+  (func $vec_set_packed_record_i32 (param $ptr i32) (param $idx i32) (param $value i32) (result i32)
+    (local $len i32) (local $fields i32) (local $dst i32) (local $src i32)
+    local.get $ptr i32.load local.set $len
+    local.get $idx local.get $len i32.eq
+    if
+      local.get $ptr local.get $value call $vec_push_packed_record_i32 return
+    end
+    local.get $idx i32.const 0 i32.ge_s local.get $idx local.get $len i32.lt_s i32.and
+    if
+      local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+      local.get $ptr local.get $idx call $vec_packed_record_addr local.set $dst
+      local.get $value i32.const 16 i32.add i32.load local.set $src
+      local.get $dst local.get $src local.get $fields i32.const 4 i32.mul memory.copy
+      i32.const 0 return
+    end
+    unreachable
+  )
+
+  ;; Reserve the destination slot for a packed scalar record update.  Keeping
+  ;; this separate from `$vec_set_packed_record_i32` lets the compiler lower
+  ;; `(set! i (Point x y) points)` without first allocating a temporary Point
+  ;; only to copy its fields into the inline array.
+  (func $vec_prepare_packed_record_set_i32 (param $ptr i32) (param $idx i32) (result i32)
+    (local $len i32) (local $cap i32)
+    local.get $ptr i32.load local.set $len
+    local.get $idx local.get $len i32.eq
+    if
+      local.get $ptr i32.const 4 i32.add i32.load local.set $cap
+      local.get $len local.get $cap i32.lt_s i32.eqz
+      if local.get $ptr call $vec_grow_packed_record_i32 drop end
+      local.get $ptr local.get $len i32.const 1 i32.add i32.store
+      local.get $ptr local.get $len call $vec_packed_record_addr
+      return
+    end
+    local.get $idx i32.const 0 i32.ge_s local.get $idx local.get $len i32.lt_s i32.and
+    if
+      local.get $ptr local.get $idx call $vec_packed_record_addr
+      return
+    end
+    unreachable
+  )
+
+  (func $vec_get_packed_record_i32 (param $ptr i32) (param $idx i32) (result i32)
+    (local $fields i32) (local $out i32) (local $dst i32) (local $src i32)
+    local.get $idx i32.const 0 i32.ge_s local.get $idx local.get $ptr i32.load i32.lt_s i32.and
+    i32.eqz if unreachable end
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $fields i32.const 0 call $record_new_i32 local.set $out
+    local.get $out i32.const 16 i32.add i32.load local.set $dst
+    local.get $ptr local.get $idx call $vec_packed_record_addr local.set $src
+    local.get $dst local.get $src local.get $fields i32.const 4 i32.mul memory.copy
+    local.get $out
+  )
+
+  (func $vec_slice_packed_record_i32 (param $ptr i32) (param $start i32) (result i32)
+    (local $len i32) (local $fields i32) (local $out i32) (local $src i32) (local $dst i32)
+    local.get $ptr i32.load local.set $len
+    local.get $start i32.const 0 i32.ge_s local.get $start local.get $len i32.le_s i32.and
+    i32.eqz if unreachable end
+    local.get $ptr i32.const 12 i32.add i32.load local.set $fields
+    local.get $len local.get $start i32.sub local.get $fields call $vec_new_packed_record_i32 local.set $out
+    local.get $ptr local.get $start call $vec_packed_record_addr local.set $src
+    local.get $out i32.const 16 i32.add i32.load local.set $dst
+    local.get $dst local.get $src local.get $len local.get $start i32.sub local.get $fields i32.mul i32.const 4 i32.mul memory.copy
+    local.get $out
+  )
+  ;; __PACKED_RECORD_RUNTIME_END__
+
+  ;; Payload enums use the same inline record layout plus one word for their
+  ;; discriminant. Their distinct magic lets Table's polymorphic helpers
+  ;; perform structural hashing/equality, while the RC path still releases
+  ;; mixed managed fields through the bitmap above.
+  (func $enum_new_i32 (param $tag i32) (param $len i32) (param $ref_words i32) (result i32)
+    (local $ptr i32)
+    (local $data i32)
+    (local $ref_map i32)
+    i32.const 32
+    local.get $len i32.const 4 i32.mul i32.add
+    local.get $ref_words i32.const 4 i32.mul i32.add
+    call $alloc
+    local.set $ptr
+    local.get $ptr i32.const 32 i32.add local.set $data
+    local.get $ref_words i32.eqz
+    if
+      i32.const 0 local.set $ref_map
+    else
+      local.get $data local.get $len i32.const 4 i32.mul i32.add local.set $ref_map
+    end
+    local.get $ptr local.get $len i32.store
+    local.get $ptr i32.const 4 i32.add local.get $len i32.store
+    local.get $ptr i32.const 8 i32.add i32.const 1 i32.store
+    local.get $ptr i32.const 12 i32.add i32.const 2 i32.store
+    local.get $ptr i32.const 16 i32.add local.get $data i32.store
+    local.get $ptr i32.const 20 i32.add i32.const 1447380020 i32.store
+    local.get $ptr i32.const 24 i32.add local.get $ref_map i32.store
+    local.get $ptr i32.const 28 i32.add local.get $tag i32.store
+    local.get $ptr
+  )
+
   (func $vec_get_i32 (param $ptr i32) (param $idx i32) (result i32)
     (local $len i32)
     ;; __VEC_GET_BOUNDS_CHECK__
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr local.get $idx call $vec_get_packed_record_i32
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     i32.const 16
     i32.add
@@ -4244,6 +5084,13 @@ fn emit_vector_runtime(
     (local $new_data i32)
     (local $i i32)
     (local $v i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr call $vec_grow_packed_record_i32
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -4342,12 +5189,26 @@ fn emit_vector_runtime(
     (local $new_data i32)
     (local $i i32)
     (local $v i32)
-    local.get $requested
-    i32.const 0
-    i32.lt_s
+    local.get $requested i32.const 0 i32.lt_s if unreachable end
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
     if
-      unreachable
+      ;; Reuse the ordinary capacity algorithm below after changing its unit
+      ;; from cells to field words would be error-prone. Grow until enough
+      ;; capacity, and deliberately keep a larger existing allocation.
+      block $packed_done
+        loop $packed_grow
+          local.get $ptr i32.const 4 i32.add i32.load
+          local.get $requested i32.ge_s
+          br_if $packed_done
+          local.get $ptr call $vec_grow_packed_record_i32 drop
+          br $packed_grow
+        end
+      end
+      local.get $ptr
+      return
     end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -4460,6 +5321,13 @@ fn emit_vector_runtime(
     (local $cap i32)
     (local $addr i32)
     (local $elem_ref i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr local.get $v call $vec_push_packed_record_i32
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -4692,6 +5560,13 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $old i32)
     ;; __DBG_RC_VEC_SET_INC__
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr local.get $idx local.get $v call $vec_set_packed_record_i32
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     ;; __DBG_RC_VEC_SET_PTR_CHECK__
     local.get $ptr
     call $vec_materialize_i32
@@ -4962,6 +5837,15 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $addr i32)
     (local $v i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr i32.load i32.const 0 i32.gt_s
+      if local.get $ptr local.get $ptr i32.load i32.const 1 i32.sub i32.store end
+      i32.const 0
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5015,6 +5899,14 @@ fn emit_vector_runtime(
     (local $elem_ref i32)
     (local $data i32)
     (local $i i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr i32.const 0 i32.store
+      i32.const 0
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -5077,6 +5969,17 @@ fn emit_vector_runtime(
     (local $len i32)
     (local $addr i32)
     (local $v i32)
+    ;; __PACKED_RECORD_RUNTIME_BEGIN__
+    local.get $ptr i32.const 20 i32.add i32.load i32.const 1447380021 i32.eq
+    if
+      local.get $ptr i32.load i32.const 0 i32.le_s if unreachable end
+      local.get $ptr
+      local.get $ptr i32.load i32.const 1 i32.sub
+      call $vec_get_packed_record_i32
+      local.get $ptr local.get $ptr i32.load i32.const 1 i32.sub i32.store
+      return
+    end
+    ;; __PACKED_RECORD_RUNTIME_END__
     local.get $ptr
     call $vec_materialize_i32
     drop
@@ -6372,7 +7275,7 @@ fn emit_vector_runtime(
     for (needle, replacement) in replacements {
         out = out.replace(needle, replacement);
     }
-    out
+    select_packed_record_runtime(out, uses_packed_scalar_record_vectors)
 }
 
 fn emit_wasi_print_runtime() -> &'static str {
@@ -7610,10 +8513,9 @@ fn emit_wasi_list_dir_runtime() -> &'static str {
     include_str!("wasi_list_dir.wat")
 }
 
-/// Table keys have two efficient physical representations today: scalar i32
-/// values (including enum tags) and vectors (the existing string keys).  The
-/// library remains polymorphic, so an unresolved key type uses the guarded
-/// runtime dispatch.  Concrete optimized specializations take the direct path.
+/// Table keys have compact scalar/vector fast paths and a representation
+/// dispatcher for nested data. The library remains polymorphic, so unresolved
+/// key types use the guarded runtime dispatcher.
 fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let key = node
         .children
@@ -7626,15 +8528,18 @@ fn compile_table_key_hash(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
     let key_code = compile_expr(key, ctx)?;
     let capacity_code = compile_expr(capacity, ctx)?;
     let helper = match key.typ.as_ref() {
-        Some(Type::List(_)) => "$table_key_hash_vec",
+        // The dynamic representation dispatcher keeps scalar vectors on the
+        // same compact path, while recursively hashing nested vectors,
+        // tuples, records, and boxed payload enums.
+        Some(Type::List(_) | Type::Tuple(_) | Type::Record(_)) => "$table_key_hash_dynamic",
+        Some(Type::Enum(enum_type)) if enum_type.boxed => "$table_key_hash_dynamic",
         Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
             "$table_key_hash_scalar"
         }
         Some(Type::Var(_)) | None => "$table_key_hash_dynamic",
-        Some(Type::Tuple(_)) | Some(Type::Function(_, _)) => {
+        Some(Type::Function(_, _)) => {
             return Err(
-                "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
-                    .to_string(),
+                "Table keys must be data values; function keys are not supported".to_string(),
             );
         }
     };
@@ -7653,15 +8558,15 @@ fn compile_table_key_equal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Stri
     let left_code = compile_expr(left, ctx)?;
     let right_code = compile_expr(right, ctx)?;
     let helper = match left.typ.as_ref() {
-        Some(Type::List(_)) => "call $table_key_equal_vec",
+        Some(Type::List(_) | Type::Tuple(_) | Type::Record(_)) => "call $table_key_equal_dynamic",
+        Some(Type::Enum(enum_type)) if enum_type.boxed => "call $table_key_equal_dynamic",
         Some(Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Enum(_) | Type::Unit) => {
             "i32.eq"
         }
         Some(Type::Var(_)) | None => "call $table_key_equal_dynamic",
-        Some(Type::Tuple(_)) | Some(Type::Function(_, _)) => {
+        Some(Type::Function(_, _)) => {
             return Err(
-                "Table keys must be scalar values, enum values, or vectors; tuple and function keys are not supported"
-                    .to_string(),
+                "Table keys must be data values; function keys are not supported".to_string(),
             );
         }
     };
@@ -7721,11 +8626,30 @@ fn emit_builtin(op: &str, node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         .get(1)
         .ok_or_else(|| format!("Missing lhs for {}", op))
         .and_then(|n| compile_expr(n, ctx))?;
+    // A boxed-enum comparison must materialize the left pointer before
+    // evaluating the right operand. Constructors use the normal temporary
+    // scratch locals, so compiling the right side in the same context could
+    // overwrite `lhs_local` before its tag is loaded.
+    let boxed_enum_equality = op == "=~"
+        && matches!(node.children.get(1).and_then(|child| child.typ.as_ref()), Some(Type::Enum(enum_type)) if enum_type.boxed);
+    let rhs_ctx = if boxed_enum_equality {
+        Ctx {
+            tmp_i32: ctx.tmp_i32 + 3,
+            ..ctx.clone()
+        }
+    } else {
+        ctx.clone()
+    };
     let b = node
         .children
         .get(2)
         .ok_or_else(|| format!("Missing rhs for {}", op))
-        .and_then(|n| compile_expr(n, ctx))?;
+        .and_then(|n| compile_expr(n, &rhs_ctx))?;
+    if boxed_enum_equality {
+        return Ok(format!(
+            "{a}\nlocal.set {lhs_local}\n{b}\nlocal.set {rhs_local}\nlocal.get {lhs_local}\ni32.const 28\ni32.add\ni32.load\nlocal.get {rhs_local}\ni32.const 28\ni32.add\ni32.load\ni32.eq"
+        ));
+    }
     let code = match op {
         "+" | "+#" => {
             if checks.int_overflow_check && !integer_arithmetic_is_proven_safe {
@@ -7962,26 +8886,64 @@ fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
         ctx: &Ctx<'_>,
     ) -> Result<String, String> {
         let pattern_index = 2 + clause_index * 2;
-        let pattern = items
-            .get(pattern_index)
-            .and_then(|expr| match expr {
-                Expression::Word(pattern) => Some(pattern.as_str()),
-                _ => None,
-            })
-            .ok_or_else(|| "match pattern must be a variant".to_string())?;
+        let (pattern, bindings): (&str, Vec<&str>) = match items.get(pattern_index) {
+            Some(Expression::Word(pattern)) => (pattern.as_str(), Vec::new()),
+            Some(Expression::Apply(parts)) => {
+                let Some(Expression::Word(pattern)) = parts.first() else {
+                    return Err("match pattern must be a variant".to_string());
+                };
+                let mut bindings = Vec::new();
+                for binding in &parts[1..] {
+                    let Expression::Word(binding) = binding else {
+                        return Err("match bindings must be names".to_string());
+                    };
+                    bindings.push(binding.as_str());
+                }
+                (pattern.as_str(), bindings)
+            }
+            _ => return Err("match pattern must be a variant".to_string()),
+        };
         let body = node
             .children
             .get(pattern_index + 1)
             .ok_or_else(|| "match branch missing body".to_string())?;
-        let body_code = compile_expr(body, ctx)?;
         if pattern == "_" {
-            return Ok(body_code);
+            return compile_expr(body, ctx);
         }
-        let tag = enum_type
-            .variants
+        let variants = enum_type.variants();
+        let (tag, variant) = variants
             .iter()
-            .position(|variant| variant == pattern)
+            .enumerate()
+            .find(|(_, variant)| variant.name == pattern)
             .ok_or_else(|| format!("unknown enum variant '{}'", pattern))?;
+        let mut body_ctx = ctx.clone();
+        let data_slot = value_slot + 1;
+        // Pattern fields occupy scratch locals after the scrutinee. Nested
+        // matches/body expressions must start beyond them or a nested binding
+        // could overwrite an outer pattern value.
+        body_ctx.tmp_i32 = value_slot + 2 + bindings.len();
+        let mut binding_prelude = Vec::new();
+        if enum_type.boxed {
+            binding_prelude.push(format!(
+                "local.get {value_slot}\ni32.const 16\ni32.add\ni32.load\nlocal.set {data_slot}"
+            ));
+            for (index, (binding, field)) in bindings.iter().zip(variant.fields.iter()).enumerate()
+            {
+                if *binding == "_" {
+                    continue;
+                }
+                let slot = value_slot + 2 + index;
+                body_ctx.locals.insert((*binding).to_string(), slot);
+                body_ctx
+                    .local_types
+                    .insert((*binding).to_string(), field.typ.clone());
+                binding_prelude.push(format!(
+                    "local.get {data_slot}\ni32.const {}\ni32.add\ni32.load\nlocal.set {slot}",
+                    index * 4
+                ));
+            }
+        }
+        let body_code = compile_expr(body, &body_ctx)?;
         let next_pattern_index = pattern_index + 2;
         let otherwise = if next_pattern_index < items.len() {
             compile_branches(
@@ -7999,7 +8961,9 @@ fn compile_match(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
             "unreachable".to_string()
         };
         Ok(format!(
-            "local.get {value_slot}\ni32.const {tag}\ni32.eq\n(if (result {result_type})\n  (then\n    {body_code}\n  )\n  (else\n    {otherwise}\n  )\n)"
+            "local.get {value_slot}\n{}\ni32.const {tag}\ni32.eq\n(if (result {result_type})\n  (then\n    {}{body_code}\n  )\n  (else\n    {otherwise}\n  )\n)",
+            if enum_type.boxed { "i32.const 28\ni32.add\ni32.load" } else { "" },
+            if binding_prelude.is_empty() { String::new() } else { format!("{}\n", binding_prelude.join("\n")) },
         ))
     }
 
@@ -8311,6 +9275,17 @@ fn is_borrowed_managed_rhs_with_env(
                         )
                     })
                     .unwrap_or(false);
+            }
+            // These generated operations return a value with an owned result:
+            // constructors allocate a fresh owner, while a managed record
+            // accessor explicitly retains its field before returning it.
+            // Recognising them here lets the existing interprocedural borrow
+            // analysis propagate that fact through ordinary wrapper lambdas.
+            if record_constructor_type(node).is_some()
+                || enum_constructor_variant(node).is_some()
+                || record_accessor_index(node).is_some()
+            {
+                return false;
             }
             if is_borrowing_accessor_expr(node) {
                 return apply_child_at(node, 1)
@@ -8768,8 +9743,7 @@ fn direct_passthrough_param_origins(
                 "do" | "block" => {
                     let mut scoped_aliases = aliases.clone();
                     for item in items.iter().skip(1).take(items.len().saturating_sub(2)) {
-                        if let Expression::Apply(binding) = item
-                        {
+                        if let Expression::Apply(binding) = item {
                             if let [Expression::Word(kw), Expression::Word(name), rhs] =
                                 binding.as_slice()
                             {
@@ -10058,6 +11032,9 @@ fn compile_tail_do(
 }
 
 fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    if let Some(record) = node.typ.as_ref().and_then(packed_scalar_record_vector) {
+        return compile_packed_scalar_record_vector_literal(node, record, ctx);
+    }
     let elem_kind = match node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
         Some(other) => {
@@ -10132,6 +11109,47 @@ fn compile_vector_literal(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<Strin
         }
     }
     out.push(format!("local.get {}", ctx.tmp_i32));
+    Ok(out.join("\n"))
+}
+
+fn compile_packed_scalar_record_vector_literal(
+    node: &TypedExpression,
+    record: &crate::types::RecordType,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let args = &node.children[1..];
+    let vec_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 2,
+        ..ctx.clone()
+    };
+    let mut out = vec![format!(
+        "i32.const {}\ni32.const {}\ncall $vec_new_packed_record_i32\nlocal.set {vec_tmp}",
+        0,
+        record.fields.len(),
+    )];
+    // `$vec_new_packed_record_i32` takes a logical length because slice
+    // construction uses it to create an already-filled destination.  A
+    // source literal, however, appends its elements below, so it must begin
+    // at length zero. Reserve the final capacity separately to avoid both
+    // leading zero records and needless growth while emitting the literal.
+    if !args.is_empty() {
+        out.push(format!(
+            "local.get {vec_tmp}\ni32.const {}\ncall $vec_capacity_i32\ndrop",
+            args.len()
+        ));
+    }
+    for arg in args {
+        let value = compile_expr(arg, &nested_ctx)?;
+        out.push(format!(
+            "{value}\nlocal.set {value_tmp}\nlocal.get {vec_tmp}\nlocal.get {value_tmp}\ncall $vec_push_packed_record_i32\ndrop"
+        ));
+        if should_release_set_rhs(arg, ctx.lambda_bindings) {
+            out.push(format!("local.get {value_tmp}\ncall $rc_release_vec\ndrop"));
+        }
+    }
+    out.push(format!("local.get {vec_tmp}"));
     Ok(out.join("\n"))
 }
 
@@ -10546,6 +11564,621 @@ fn compile_tuple(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String
          local.get {out_tmp}"
     ));
     Ok(out.join("\n"))
+}
+
+fn record_constructor_type(node: &TypedExpression) -> Option<&crate::types::RecordType> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    let Type::Record(record) = node.typ.as_ref()? else {
+        return None;
+    };
+    (name == &record.name).then_some(record.as_ref())
+}
+
+fn record_accessor_index(node: &TypedExpression) -> Option<usize> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let Expression::Word(accessor) = items.first()? else {
+        return None;
+    };
+    if items.len() != 2 {
+        return None;
+    }
+    let Type::Function(input, _) = node.children.first()?.typ.as_ref()? else {
+        return None;
+    };
+    let Type::Record(record) = input.as_ref() else {
+        return None;
+    };
+    let field_name = accessor.strip_prefix(&format!("{}/", record.name))?;
+    record
+        .fields
+        .iter()
+        .position(|field| field.name == field_name)
+}
+
+fn enum_constructor_variant(
+    node: &TypedExpression,
+) -> Option<(Arc<crate::types::EnumType>, crate::types::EnumVariant)> {
+    let Expression::Apply(items) = &node.expr else {
+        return None;
+    };
+    let Expression::Word(name) = items.first()? else {
+        return None;
+    };
+    let Type::Enum(enum_type) = node.typ.as_ref()? else {
+        return None;
+    };
+    enum_type
+        .variant(name)
+        .map(|variant| (enum_type.clone(), variant))
+}
+
+fn enum_ref_bitmap_words(variant: &crate::types::EnumVariant) -> Vec<u32> {
+    let mut words = vec![0_u32; variant.fields.len().div_ceil(32)];
+    for (index, field) in variant.fields.iter().enumerate() {
+        if is_ref_type(&field.typ) {
+            words[index / 32] |= 1_u32 << (index % 32);
+        }
+    }
+    while words.last().is_some_and(|word| *word == 0) {
+        words.pop();
+    }
+    words
+}
+
+/// First-class generic constructors are emitted once for the nominal
+/// declaration, while each call may instantiate its parameters differently.
+/// Their field map therefore cannot be chosen from one particular use such as
+/// `Option Int`: a later `Option [Char]` must remain valid.  Marking an
+/// unknown field as managed is safe because `$rc_retain`/`$rc_release` first
+/// reject scalar immediates; it is deliberately only used for these erased
+/// helper functions.  Direct saturated construction still uses the exact map.
+fn conservative_enum_ref_bitmap_words(
+    enum_type: &crate::types::EnumType,
+    variant: &crate::types::EnumVariant,
+) -> Vec<u32> {
+    if enum_type.type_params.is_empty() {
+        return enum_ref_bitmap_words(variant);
+    }
+    let words = vec![u32::MAX; variant.fields.len().div_ceil(32)];
+    if words.is_empty() {
+        return words;
+    }
+    let mut words = words;
+    let remainder = variant.fields.len() % 32;
+    if remainder != 0 {
+        *words.last_mut().expect("non-empty ref bitmap") = (1_u32 << remainder) - 1;
+    }
+    words
+}
+
+fn compile_enum_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let (enum_type, variant) = enum_constructor_variant(node)
+        .ok_or_else(|| "internal error: expected enum constructor".to_string())?;
+    if !enum_type.boxed {
+        return Err("internal error: immediate enum constructor was called".to_string());
+    }
+    if node.children.len() != variant.fields.len() + 1 {
+        return Err(format!(
+            "enum variant '{}' expected {} fields",
+            variant.name,
+            variant.fields.len()
+        ));
+    }
+    let tag = enum_type
+        .variants()
+        .iter()
+        .position(|case| case.name == variant.name)
+        .expect("enum constructor belongs to enum");
+    let out_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let data_tmp = ctx.tmp_i32 + 2;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 3,
+        ..ctx.clone()
+    };
+    let ref_words = enum_ref_bitmap_words(&variant);
+    let mut out = vec![format!(
+        "i32.const {tag}\ni32.const {}\ni32.const {}\ncall $enum_new_i32\nlocal.set {out_tmp}",
+        variant.fields.len(),
+        ref_words.len()
+    )];
+    for (index, word) in ref_words.iter().enumerate() {
+        out.push(format!("local.get {out_tmp}\ni32.const 24\ni32.add\ni32.load\ni32.const {}\ni32.add\ni32.const {}\ni32.store", index * 4, *word as i32));
+    }
+    out.push(format!(
+        "local.get {out_tmp}\ni32.const 16\ni32.add\ni32.load\nlocal.set {data_tmp}"
+    ));
+    for (index, child) in node.children.iter().skip(1).enumerate() {
+        let value = compile_expr(child, &nested_ctx)?;
+        out.push(format!("{value}\nlocal.set {value_tmp}"));
+        if child.typ.as_ref().is_some_and(is_managed_local_type)
+            && !should_release_set_rhs(child, ctx.lambda_bindings)
+        {
+            out.push(format!(
+                "local.get {value_tmp}\ncall {}\ndrop",
+                rc_retain_for_type(child.typ.as_ref().unwrap())
+            ));
+        }
+        out.push(format!(
+            "local.get {data_tmp}\ni32.const {}\ni32.add\nlocal.get {value_tmp}\ni32.store",
+            index * 4
+        ));
+    }
+    out.push(format!("local.get {out_tmp}"));
+    Ok(out.join("\n"))
+}
+
+fn enum_constructor_signature(
+    enum_type: &Arc<crate::types::EnumType>,
+    variant: &crate::types::EnumVariant,
+) -> (Vec<Type>, Type) {
+    (
+        variant
+            .fields
+            .iter()
+            .map(|field| field.typ.clone())
+            .collect(),
+        Type::Enum(enum_type.clone()),
+    )
+}
+
+fn compile_enum_constructor_func(
+    enum_type: &crate::types::EnumType,
+    variant: &crate::types::EnumVariant,
+    tag: usize,
+) -> String {
+    let generic = !enum_type.type_params.is_empty();
+    let ref_words = conservative_enum_ref_bitmap_words(enum_type, variant);
+    let mut out = format!("  (func ${}{}", ident(&variant.name), "");
+    for _ in &variant.fields {
+        out.push_str(" (param i32)");
+    }
+    out.push_str(" (result i32)\n    (local $out i32) (local $data i32)\n");
+    out.push_str(&format!("    i32.const {tag}\n    i32.const {}\n    i32.const {}\n    call $enum_new_i32\n    local.set $out\n", variant.fields.len(), ref_words.len()));
+    for (index, word) in ref_words.iter().enumerate() {
+        out.push_str(&format!("    local.get $out\n    i32.const 24\n    i32.add\n    i32.load\n    i32.const {}\n    i32.add\n    i32.const {}\n    i32.store\n", index * 4, *word as i32));
+    }
+    out.push_str(
+        "    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n",
+    );
+    for (index, field) in variant.fields.iter().enumerate() {
+        if generic || is_ref_type(&field.typ) {
+            out.push_str(&format!(
+                "    local.get {index}\n    call {}\n    drop\n",
+                if generic { "$rc_retain" } else { rc_retain_for_type(&field.typ) }
+            ));
+        }
+        out.push_str(&format!("    local.get $data\n    i32.const {}\n    i32.add\n    local.get {index}\n    i32.store\n", index * 4));
+    }
+    out.push_str("    local.get $out\n  )\n");
+    out
+}
+
+/// Collect the nominal record declarations reachable from a typed program.
+/// Generated record functions are emitted as ordinary first-class functions,
+/// so this deliberately follows field types as well as expression types.
+fn collect_record_types_from_type(
+    typ: &Type,
+    out: &mut BTreeMap<String, Arc<crate::types::RecordType>>,
+) {
+    match typ {
+        Type::Record(record) => {
+            if out.insert(record.name.clone(), record.clone()).is_none() {
+                for field in &record.fields {
+                    collect_record_types_from_type(&field.typ, out);
+                }
+            }
+        }
+        Type::List(inner) => collect_record_types_from_type(inner, out),
+        Type::Tuple(parts) => {
+            for part in parts {
+                collect_record_types_from_type(part, out);
+            }
+        }
+        Type::Function(input, result) => {
+            collect_record_types_from_type(input, out);
+            collect_record_types_from_type(result, out);
+        }
+        Type::Int
+        | Type::Dec
+        | Type::Bool
+        | Type::Char
+        | Type::Unit
+        | Type::Enum(_)
+        | Type::Var(_) => {}
+    }
+}
+
+fn collect_enum_types_from_type(
+    typ: &Type,
+    out: &mut BTreeMap<String, Arc<crate::types::EnumType>>,
+) {
+    match typ {
+        Type::Enum(enum_type) => {
+            if out
+                .insert(enum_type.name.clone(), enum_type.clone())
+                .is_none()
+            {
+                for variant in enum_type.variants() {
+                    for field in variant.fields {
+                        collect_enum_types_from_type(&field.typ, out);
+                    }
+                }
+            }
+        }
+        Type::Record(record) => {
+            for field in &record.fields {
+                collect_enum_types_from_type(&field.typ, out);
+            }
+        }
+        Type::List(inner) => collect_enum_types_from_type(inner, out),
+        Type::Tuple(parts) => {
+            for part in parts {
+                collect_enum_types_from_type(part, out);
+            }
+        }
+        Type::Function(input, result) => {
+            collect_enum_types_from_type(input, out);
+            collect_enum_types_from_type(result, out);
+        }
+        Type::Int | Type::Dec | Type::Bool | Type::Char | Type::Unit | Type::Var(_) => {}
+    }
+}
+
+fn collect_enum_types(
+    node: &TypedExpression,
+    out: &mut BTreeMap<String, Arc<crate::types::EnumType>>,
+) {
+    if let Some(typ) = &node.typ {
+        collect_enum_types_from_type(typ, out);
+    }
+    for child in &node.children {
+        collect_enum_types(child, out);
+    }
+}
+
+fn collect_record_types(
+    node: &TypedExpression,
+    out: &mut BTreeMap<String, Arc<crate::types::RecordType>>,
+) {
+    if let Some(typ) = &node.typ {
+        collect_record_types_from_type(typ, out);
+    }
+    for child in &node.children {
+        collect_record_types(child, out);
+    }
+}
+
+fn record_constructor_signature(record: &crate::types::RecordType) -> (Vec<Type>, Type) {
+    (
+        record
+            .fields
+            .iter()
+            .map(|field| field.typ.clone())
+            .collect(),
+        Type::Record(Arc::new(record.clone())),
+    )
+}
+
+fn record_accessor_signature(
+    field: &crate::types::RecordField,
+    record: &crate::types::RecordType,
+) -> (Vec<Type>, Type) {
+    (
+        vec![Type::Record(Arc::new(record.clone()))],
+        field.typ.clone(),
+    )
+}
+
+fn record_ref_bitmap_words(record: &crate::types::RecordType) -> Vec<u32> {
+    let mut words = vec![0_u32; record.fields.len().div_ceil(32)];
+    for (index, field) in record.fields.iter().enumerate() {
+        if is_ref_type(&field.typ) {
+            words[index / 32] |= 1_u32 << (index % 32);
+        }
+    }
+    while words.last().is_some_and(|word| *word == 0) {
+        words.pop();
+    }
+    words
+}
+
+fn conservative_record_ref_bitmap_words(record: &crate::types::RecordType) -> Vec<u32> {
+    if record.type_params.is_empty() {
+        return record_ref_bitmap_words(record);
+    }
+    let words = vec![u32::MAX; record.fields.len().div_ceil(32)];
+    if words.is_empty() {
+        return words;
+    }
+    let mut words = words;
+    let remainder = record.fields.len() % 32;
+    if remainder != 0 {
+        *words.last_mut().expect("non-empty ref bitmap") = (1_u32 << remainder) - 1;
+    }
+    words
+}
+
+fn emit_record_ref_map_initialization(
+    record: &crate::types::RecordType,
+    record_tmp: usize,
+) -> Vec<String> {
+    record_ref_bitmap_words(record)
+        .into_iter()
+        .enumerate()
+        .map(|(index, word)| {
+            format!(
+                "local.get {record_tmp}\n\
+                 i32.const 24\n\
+                 i32.add\n\
+                 i32.load\n\
+                 i32.const {}\n\
+                 i32.add\n\
+                 i32.const {}\n\
+                 i32.store",
+                index * 4,
+                word as i32
+            )
+        })
+        .collect()
+}
+
+fn compile_record_constructor(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
+    let record = record_constructor_type(node)
+        .ok_or_else(|| "internal error: expected record constructor".to_string())?;
+    if node.children.len() != record.fields.len() + 1 {
+        return Err(format!(
+            "record '{}' constructor expected {} fields",
+            record.name,
+            record.fields.len()
+        ));
+    }
+    let out_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let data_tmp = ctx.tmp_i32 + 2;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 3,
+        ..ctx.clone()
+    };
+    let ref_words = record_ref_bitmap_words(record);
+    let mut out = vec![format!(
+        "i32.const {}\n\
+         i32.const {}\n\
+         call $record_new_i32\n\
+         local.set {out_tmp}",
+        record.fields.len(),
+        ref_words.len(),
+    )];
+    out.extend(emit_record_ref_map_initialization(record, out_tmp));
+    out.push(format!(
+        "local.get {out_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {data_tmp}"
+    ));
+    for (index, child) in node.children.iter().skip(1).enumerate() {
+        let value = compile_expr(child, &nested_ctx)?;
+        out.push(format!("{value}\nlocal.set {value_tmp}"));
+        if child.typ.as_ref().is_some_and(is_managed_local_type)
+            && !should_release_set_rhs(child, ctx.lambda_bindings)
+        {
+            let retain = rc_retain_for_type(child.typ.as_ref().expect("managed record field type"));
+            out.push(format!("local.get {value_tmp}\ncall {retain}\ndrop"));
+        }
+        out.push(format!(
+            "local.get {data_tmp}\n\
+             i32.const {}\n\
+             i32.add\n\
+             local.get {value_tmp}\n\
+             i32.store",
+            index * 4
+        ));
+    }
+    out.push(format!("local.get {out_tmp}"));
+    Ok(out.join("\n"))
+}
+
+fn compile_record_accessor(
+    node: &TypedExpression,
+    field_index: usize,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let input = node
+        .children
+        .get(1)
+        .ok_or_else(|| "record accessor missing record value".to_string())?;
+    if let Some(packed) = compile_packed_record_accessor(input, field_index, ctx)? {
+        return Ok(packed);
+    }
+    let record = compile_expr(
+        input,
+        &Ctx {
+            tmp_i32: ctx.tmp_i32 + 2,
+            ..ctx.clone()
+        },
+    )?;
+    let record_tmp = ctx.tmp_i32;
+    let value_tmp = ctx.tmp_i32 + 1;
+    let field_type = node
+        .typ
+        .as_ref()
+        .ok_or_else(|| "record accessor missing result type".to_string())?;
+    let mut out = vec![format!(
+        "{record}\n\
+         local.set {record_tmp}\n\
+         local.get {record_tmp}\n\
+         i32.const 16\n\
+         i32.add\n\
+         i32.load\n\
+         i32.const {}\n\
+         i32.add\n\
+         i32.load\n\
+         local.set {value_tmp}",
+        field_index * 4
+    )];
+    if is_managed_local_type(field_type) {
+        out.push(format!(
+            "local.get {value_tmp}\ncall {}\ndrop",
+            rc_retain_for_type(field_type)
+        ));
+    }
+    if should_release_set_rhs(input, ctx.lambda_bindings) {
+        let release = rc_release_for_opt_type(input.typ.as_ref());
+        out.push(format!("local.get {record_tmp}\ncall {release}\ndrop"));
+    }
+    out.push(format!("local.get {value_tmp}"));
+    Ok(out.join("\n"))
+}
+
+/// Fuse `Point/x (get i points)` when `points : [Point]` has only scalar
+/// fields. The vector stores those fields inline, so materialising a temporary
+/// `Point` merely to immediately project one field would defeat the layout.
+fn compile_packed_record_accessor(
+    input: &TypedExpression,
+    field_index: usize,
+    ctx: &Ctx<'_>,
+) -> Result<Option<String>, String> {
+    let Expression::Apply(items) = &input.expr else {
+        return Ok(None);
+    };
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "get") || items.len() != 3 {
+        return Ok(None);
+    }
+    let Some(vector) = apply_child_at(input, 1) else {
+        return Ok(None);
+    };
+    let Some(vector_type) = vector.typ.as_ref() else {
+        return Ok(None);
+    };
+    if packed_scalar_record_vector(vector_type).is_none() {
+        return Ok(None);
+    }
+    let index = apply_child_at(input, 2).ok_or_else(|| "get missing index".to_string())?;
+    let nested = Ctx {
+        tmp_i32: ctx.tmp_i32 + 3,
+        ..ctx.clone()
+    };
+    let vec_code = compile_expr(vector, &nested)?;
+    let index_code = compile_expr(index, &nested)?;
+    let ptr = ctx.tmp_i32;
+    let idx = ctx.tmp_i32 + 1;
+    let len = ctx.tmp_i32 + 2;
+    let checks = if parse_env_bool_like("QUE_BOUNDS_CHECK", true) {
+        format!(
+            "local.get {idx}\ni32.const 0\ni32.lt_s\nif\n  unreachable\nend\n\
+             local.get {ptr}\ni32.load\nlocal.set {len}\n\
+             local.get {idx}\nlocal.get {len}\ni32.ge_s\nif\n  unreachable\nend\n"
+        )
+    } else {
+        String::new()
+    };
+    // `[Point]` is normally packed, but a generic collection helper can still
+    // supply an ordinary vector with the same static type.  Dispatch on the
+    // layout tag so this fusion is always a performance choice, never a
+    // representation assumption visible to source programs.
+    let record_tmp = ctx.tmp_i32 + 3;
+    let value_tmp = ctx.tmp_i32 + 4;
+    Ok(Some(format!(
+        "{vec_code}\nlocal.set {ptr}\n{index_code}\nlocal.set {idx}\n{checks}\
+         local.get {ptr}\ni32.const 20\ni32.add\ni32.load\n\
+         i32.const 1447380021\ni32.eq\n\
+         if (result i32)\n\
+           local.get {ptr}\ni32.const 16\ni32.add\ni32.load\n\
+           local.get {idx}\nlocal.get {ptr}\ni32.const 12\ni32.add\ni32.load\n\
+           i32.mul\ni32.const 4\ni32.mul\ni32.add\n\
+           i32.const {}\ni32.add\ni32.load\n\
+         else\n\
+           local.get {ptr}\nlocal.get {idx}\ncall $vec_get_i32\n\
+           local.set {record_tmp}\n\
+           local.get {record_tmp}\ncall $rc_retain_vec\ndrop\n\
+           local.get {record_tmp}\ni32.const 16\ni32.add\ni32.load\n\
+           i32.const {}\ni32.add\ni32.load\n\
+           local.set {value_tmp}\n\
+           local.get {record_tmp}\ncall $rc_release_vec\ndrop\n\
+           local.get {value_tmp}\n\
+         end",
+        field_index * 4,
+        field_index * 4,
+    )))
+}
+
+/// Emit the function behind a record constructor when it escapes as a value
+/// (or is partially applied).  Direct, saturated construction has a smaller
+/// lowering above; this version has normal borrowed-function argument
+/// semantics, so managed arguments are retained for the newly-created record.
+fn compile_record_constructor_func(record: &crate::types::RecordType) -> String {
+    let generic = !record.type_params.is_empty();
+    let ref_words = conservative_record_ref_bitmap_words(record);
+    let mut out = String::new();
+    out.push_str(&format!("  (func ${}", ident(&record.name)));
+    for _ in &record.fields {
+        out.push_str(" (param i32)");
+    }
+    out.push_str(" (result i32)\n    (local $out i32) (local $data i32)\n");
+    out.push_str(&format!(
+        "    i32.const {}\n    i32.const {}\n    call $record_new_i32\n    local.set $out\n",
+        record.fields.len(),
+        ref_words.len()
+    ));
+    for (index, word) in ref_words.iter().enumerate() {
+        out.push_str(&format!(
+            "    local.get $out\n    i32.const 24\n    i32.add\n    i32.load\n    i32.const {}\n    i32.add\n    i32.const {}\n    i32.store\n",
+            index * 4,
+            *word as i32
+        ));
+    }
+    out.push_str(
+        "    local.get $out\n    i32.const 16\n    i32.add\n    i32.load\n    local.set $data\n",
+    );
+    for (index, field) in record.fields.iter().enumerate() {
+        if generic || is_ref_type(&field.typ) {
+            out.push_str(&format!(
+                "    local.get {}\n    call {}\n    drop\n",
+                index,
+                if generic { "$rc_retain" } else { rc_retain_for_type(&field.typ) }
+            ));
+        }
+        out.push_str(&format!(
+            "    local.get $data\n    i32.const {}\n    i32.add\n    local.get {}\n    i32.store\n",
+            index * 4,
+            index
+        ));
+    }
+    out.push_str("    local.get $out\n  )\n");
+    out
+}
+
+/// Emit the function behind a record accessor when it is used as a value.
+/// Returning a managed field creates an independent owned result, just like
+/// the direct accessor lowering.
+fn compile_record_accessor_func(record: &crate::types::RecordType, field_index: usize) -> String {
+    let field = &record.fields[field_index];
+    let name = format!("{}/{}", record.name, field.name);
+    let mut out = format!(
+        "  (func ${} (param $record i32) (result i32)\n    (local $value i32)\n    local.get $record\n    i32.const 16\n    i32.add\n    i32.load\n    i32.const {}\n    i32.add\n    i32.load\n    local.set $value\n",
+        ident(&name),
+        field_index * 4
+    );
+    if !record.type_params.is_empty() || is_ref_type(&field.typ) {
+        out.push_str(&format!(
+            "    local.get $value\n    call {}\n    drop\n",
+            if record.type_params.is_empty() {
+                rc_retain_for_type(&field.typ)
+            } else {
+                "$rc_retain"
+            }
+        ));
+    }
+    out.push_str("    local.get $value\n  )\n");
+    out
 }
 
 fn compile_fst(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
@@ -11334,6 +12967,41 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
             return Err("get missing return type".to_string());
         }
     };
+    // Packed scalar-record vectors store fields rather than record pointers.
+    // A bare `get` must therefore materialise an ordinary record value; the
+    // accessor fusion above avoids this allocation for immediate projections.
+    // A generic vector builder may still produce ordinary storage for the same
+    // static `[Record]` type, so choose the representation by its runtime tag.
+    if matches!(node.typ.as_ref(), Some(Type::Record(_)))
+        && xs_node
+            .typ
+            .as_ref()
+            .and_then(packed_scalar_record_vector)
+            .is_some()
+    {
+        let ptr_tmp = ctx.tmp_i32;
+        let idx_tmp = ctx.tmp_i32 + 1;
+        let value_tmp = ctx.tmp_i32 + 2;
+        let load = format!(
+            "{xs}\nlocal.set {ptr_tmp}\n\
+             {idx}\nlocal.set {idx_tmp}\n\
+             local.get {ptr_tmp}\ni32.const 20\ni32.add\ni32.load\n\
+             i32.const 1447380021\ni32.eq\n\
+             if (result i32)\n\
+               local.get {ptr_tmp}\nlocal.get {idx_tmp}\ncall $vec_get_packed_record_i32\n\
+             else\n\
+               local.get {ptr_tmp}\nlocal.get {idx_tmp}\ncall $vec_get_i32\n\
+             end"
+        );
+        if release_xs_after {
+            return Ok(format!(
+                "{load}\nlocal.set {value_tmp}\n\
+                 local.get {ptr_tmp}\ncall $rc_release_vec\ndrop\n\
+                 local.get {value_tmp}"
+            ));
+        }
+        return Ok(load);
+    }
     let statically_in_bounds =
         static_proof_is_safe(crate::static_analysis::ProofKind::BoundsRead, &node.expr);
     let runtime_bounds_check =
@@ -11482,6 +13150,106 @@ fn compile_get(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     }
 }
 
+/// Lower a direct scalar record constructor store into a packed record vector.
+///
+/// The runtime magic check is important: `[Point]` does not by itself promise
+/// that a value came from the packed constructor path (for example, a future
+/// generic collection helper may still build an ordinary vector).  The packed
+/// arm writes fields directly; the ordinary-vector arm preserves the existing
+/// allocate-and-store implementation and ownership behaviour.
+fn compile_packed_record_constructor_set(
+    vector: &TypedExpression,
+    index: &TypedExpression,
+    value: &TypedExpression,
+    record: &crate::types::RecordType,
+    xs: &str,
+    release_target: bool,
+    ctx: &Ctx<'_>,
+) -> Result<String, String> {
+    let ptr_tmp = ctx.tmp_i32 + 3;
+    let value_tmp = ctx.tmp_i32;
+    let dst_tmp = ctx.tmp_i32 + 1;
+    let index_tmp = ctx.tmp_i32 + 2;
+    let keep_tmp = ctx.tmp_i32 + 4;
+    let nested_ctx = Ctx {
+        tmp_i32: ctx.tmp_i32 + 5,
+        ..ctx.clone()
+    };
+    let index_code = compile_expr(index, &nested_ctx)?;
+    let managed_slots = managed_local_slots(ctx);
+    let target_release = if release_target {
+        emit_release_managed_temp_if_not_local_alias(
+            ptr_tmp,
+            keep_tmp,
+            &managed_slots,
+            vector.typ.as_ref(),
+        )
+    } else {
+        String::new()
+    };
+
+    let mut packed_fields = Vec::with_capacity(record.fields.len());
+    for (field_index, field) in value.children.iter().skip(1).enumerate() {
+        let field_code = compile_expr(field, &nested_ctx)?;
+        packed_fields.push(format!(
+            "{field_code}\nlocal.set {value_tmp}\n\
+             local.get {dst_tmp}\n\
+             i32.const {}\n\
+             i32.add\n\
+             local.get {value_tmp}\n\
+             i32.store",
+            field_index * 4
+        ));
+    }
+
+    // The direct constructor is fresh.  The ordinary vector fallback retains
+    // it, so release the temporary owner exactly as the generic `set!` path
+    // does after the call.
+    let fallback_value = compile_record_constructor(value, &nested_ctx)?;
+    let fallback_release = if should_release_set_rhs(value, ctx.lambda_bindings) {
+        format!(
+            "\nlocal.get {value_tmp}\ncall {}\ndrop",
+            rc_release_for_opt_type(value.typ.as_ref())
+        )
+    } else {
+        String::new()
+    };
+    let target_release_suffix = if target_release.is_empty() {
+        String::new()
+    } else {
+        format!("\n{target_release}")
+    };
+
+    Ok(format!(
+        "{xs}\n\
+         local.set {ptr_tmp}\n\
+         {index_code}\n\
+         local.set {index_tmp}\n\
+         local.get {ptr_tmp}\n\
+         i32.const 20\n\
+         i32.add\n\
+         i32.load\n\
+         i32.const 1447380021\n\
+         i32.eq\n\
+         if\n\
+           local.get {ptr_tmp}\n\
+           local.get {index_tmp}\n\
+           call $vec_prepare_packed_record_set_i32\n\
+           local.set {dst_tmp}\n\
+           {}\n\
+         else\n\
+           local.get {ptr_tmp}\n\
+           local.get {index_tmp}\n\
+           {fallback_value}\n\
+           local.tee {value_tmp}\n\
+           call $vec_set_i32\n\
+           drop{fallback_release}\n\
+         end{target_release_suffix}\n\
+         i32.const 0",
+        packed_fields.join("\n"),
+    ))
+}
+
 fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> {
     let xs_node = node
         .children
@@ -11530,7 +13298,6 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
         .children
         .get(3)
         .ok_or_else(|| "set! missing value".to_string())?;
-    let v = compile_expr(val_node, &nested_ctx)?;
     val_node
         .typ
         .as_ref()
@@ -11568,7 +13335,7 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     let target_prefix = if release_target {
         format!("{xs}\nlocal.tee {target_tmp}")
     } else {
-        xs
+        xs.clone()
     };
     let target_release = if release_target {
         emit_release_managed_temp_if_not_local_alias(
@@ -11580,6 +13347,20 @@ fn compile_set(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         String::new()
     };
+    if let Some(record) = packed_record_constructor_for_vector(xs_node, val_node) {
+        return compile_packed_record_constructor_set(
+            xs_node,
+            node.children
+                .get(2)
+                .ok_or_else(|| "set! missing index".to_string())?,
+            val_node,
+            record,
+            &xs,
+            release_target,
+            ctx,
+        );
+    }
+    let v = compile_expr(val_node, &nested_ctx)?;
     let proven_replacement = static_proof_is_safe(
         crate::static_analysis::ProofKind::BoundsWriteReplacement,
         &node.expr,
@@ -12943,11 +14724,7 @@ fn collect_loop_vector_get_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut Has
 // Keep data-pointer hoisting to values that are already available at loop
 // entry.  This is deliberately conservative: losing a pointer cache is cheap;
 // reading an uninitialized managed slot is a miscompile.
-fn collect_loop_local_binding_slots(
-    expr: &Expression,
-    ctx: &Ctx<'_>,
-    out: &mut HashSet<usize>,
-) {
+fn collect_loop_local_binding_slots(expr: &Expression, ctx: &Ctx<'_>, out: &mut HashSet<usize>) {
     let Expression::Apply(items) = expr else {
         return;
     };
@@ -13149,6 +14926,14 @@ fn compile_cdr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String> 
     } else {
         "i32.const 1".to_string()
     };
+    if xs_node
+        .typ
+        .as_ref()
+        .and_then(packed_scalar_record_vector)
+        .is_some()
+    {
+        return Ok(format!("{xs}\n{start}\ncall $vec_slice_packed_record_i32"));
+    }
     let elem = match xs_node.typ.as_ref() {
         Some(Type::List(inner)) => vec_elem_kind_from_type(inner)?,
         Some(other) => {
@@ -13772,6 +15557,39 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
             body.push_str("    local.get $out)\n");
             format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n{body}")
         }
+        Type::List(inner) if packed_scalar_record_vector(typ).is_some() => {
+            // A scalar record vector stores each record's fields inline, not
+            // pointers to separately allocated records.  The ordinary vector
+            // serializer below would pass its first inline field (for example
+            // `Point/y`) to the record serializer as though it were a record
+            // pointer, producing believable but bogus zero-valued records at
+            // the WASI boundary.  Serialize the inline fields directly.
+            let Type::Record(record) = inner.as_ref() else {
+                unreachable!("packed record vectors always contain records");
+            };
+            let mut nested = String::new();
+            for field in &record.fields {
+                nested.push_str(&emit_wasi_serializer(&field.typ, emitted)?);
+            }
+            let field_count = record.fields.len();
+            let mut fields = String::new();
+            for (index, field) in record.fields.iter().enumerate() {
+                fields.push_str(&format!(
+                    "      {}\n      local.get $data\n      local.get $i\n      i32.const {field_count}\n      i32.mul\n      i32.const {index}\n      i32.add\n      i32.const 4\n      i32.mul\n      i32.add\n      i32.load\n      call $__wasi_serialize_{}\n      local.set $tmp\n      local.get $out\n      local.get $tmp\n      call $__serde_append\n      local.get $tmp\n      call $rc_release_vec\n      drop\n",
+                    wasi_append_literal("$out", &format!("{} ", field.name))
+                        .replace('\n', "\n      "),
+                    wasi_serde_name(&field.typ),
+                ));
+                if index + 1 < field_count {
+                    fields.push_str("      local.get $out i32.const 32 call $vec_push_i32 drop\n");
+                }
+            }
+            format!(
+                "{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $len i32) (local $data i32) (local $i i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 91 call $vec_push_i32 drop\n    local.get $value i32.load local.set $len\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n    block $done loop $items\n      local.get $i local.get $len i32.ge_u br_if $done\n      local.get $i i32.const 0 i32.gt_u if local.get $out i32.const 32 call $vec_push_i32 drop end\n      {}\n{fields}      local.get $out i32.const 32 call $vec_push_i32 drop\n      local.get $out i32.const 125 call $vec_push_i32 drop\n      local.get $i i32.const 1 i32.add local.set $i br $items\n    end end\n    local.get $out i32.const 93 call $vec_push_i32 drop\n    local.get $out)\n",
+                wasi_append_literal("$out", &format!("{}{{ ", record.name))
+                    .replace('\n', "\n      "),
+            )
+        }
         Type::List(inner) => {
             let child = wasi_serde_name(inner);
             let nested = emit_wasi_serializer(inner, emitted)?;
@@ -13787,19 +15605,71 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
             }
             format!("{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 123 call $vec_push_i32 drop\n    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n{fields}    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n")
         }
+        Type::Record(record) => {
+            let mut nested = String::new();
+            for field in &record.fields {
+                nested.push_str(&emit_wasi_serializer(&field.typ, emitted)?);
+            }
+            let mut fields = String::new();
+            for (index, field) in record.fields.iter().enumerate() {
+                fields.push_str(&format!(
+                    "    {}\n    local.get $data i32.const {} i32.add i32.load call $__wasi_serialize_{} local.set $tmp\n    local.get $out local.get $tmp call $__serde_append\n    local.get $tmp call $rc_release_vec drop\n",
+                    wasi_append_literal("$out", &format!("{} ", field.name)).replace('\n', "\n    "),
+                    index * 4,
+                    wasi_serde_name(&field.typ)
+                ));
+                if index + 1 < record.fields.len() {
+                    fields.push_str("    local.get $out i32.const 32 call $vec_push_i32 drop\n");
+                }
+            }
+            format!(
+                "{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    {}\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n{fields}    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n",
+                wasi_append_literal("$out", &format!("{}{{ ", record.name)).replace('\n', "\n    ")
+            )
+        }
         Type::Enum(enum_type) => {
+            if enum_type.boxed {
+                let variants = enum_type.variants();
+                let mut nested = String::new();
+                for variant in &variants {
+                    for field in &variant.fields {
+                        nested.push_str(&emit_wasi_serializer(&field.typ, emitted)?);
+                    }
+                }
+                let mut branches = String::new();
+                for (tag, variant) in variants.iter().enumerate() {
+                    let mut fields = String::new();
+                    for (index, field) in variant.fields.iter().enumerate() {
+                        fields.push_str(&format!(
+                            "      local.get $out i32.const 32 call $vec_push_i32 drop\n      local.get $data i32.const {} i32.add i32.load call $__wasi_serialize_{} local.set $tmp\n      local.get $out local.get $tmp call $__serde_append\n      local.get $tmp call $rc_release_vec drop\n",
+                            index * 4,
+                            wasi_serde_name(&field.typ)
+                        ));
+                    }
+                    branches.push_str(&format!(
+                        "    local.get $tag i32.const {tag} i32.eq\n    if\n      {}\n{fields}    else\n",
+                        wasi_append_literal("$out", &variant.name).replace('\n', "\n      "),
+                    ));
+                }
+                branches.push_str("      unreachable\n");
+                for _ in &variants { branches.push_str("    end\n"); }
+                return Ok(format!(
+                    "{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $data i32) (local $tmp i32) (local $tag i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    {}\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n    local.get $value i32.const 28 i32.add i32.load local.set $tag\n{branches}    local.get $out i32.const 32 call $vec_push_i32 drop\n    local.get $out i32.const 125 call $vec_push_i32 drop\n    local.get $out)\n",
+                    wasi_append_literal("$out", &format!("{}{{ ", enum_type.name)).replace('\n', "\n    "),
+                ));
+            }
             // Enums are compact i32 tags at runtime, but values crossing the
             // WASI boundary should remain readable Calque data.  Print the
             // declared variant name rather than leaking its implementation tag.
             let mut branches = String::new();
-            for (tag, variant) in enum_type.variants.iter().enumerate() {
-                let literal = wasi_append_literal("$out", variant).replace('\n', "\n      ");
+            for (tag, variant) in enum_type.variants().iter().enumerate() {
+                let literal = wasi_append_literal("$out", &variant.name).replace('\n', "\n      ");
                 branches.push_str(&format!(
                     "    local.get $value\n    i32.const {tag}\n    i32.eq\n    if\n      {literal}\n    else\n"
                 ));
             }
             branches.push_str("      unreachable\n");
-            for _ in &enum_type.variants {
+            for _ in enum_type.variants() {
                 branches.push_str("    end\n");
             }
             format!("  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32)\n    i32.const 0\n    i32.const 0\n    call $vec_new_i32\n    local.set $out\n{branches}    local.get $out)\n")
@@ -13931,8 +15801,78 @@ fn emit_wasi_deserializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<S
             }
             format!("{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $item i32)\n    i32.const 123 call $__deser_expect\n    i32.const 0 i32.const 1 call $vec_new_i32 local.set $out\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n")
         }
+        Type::Record(record) => {
+            let mut nested = String::new();
+            for field in &record.fields {
+                nested.push_str(&emit_wasi_deserializer(&field.typ, emitted)?);
+            }
+            let ref_words = record_ref_bitmap_words(record);
+            let mut ref_map = String::new();
+            for (index, word) in ref_words.iter().enumerate() {
+                ref_map.push_str(&format!(
+                    "    local.get $out i32.const 24 i32.add i32.load i32.const {} i32.add i32.const {} i32.store\n",
+                    index * 4,
+                    *word as i32
+                ));
+            }
+            let mut fields = String::new();
+            for (index, field) in record.fields.iter().enumerate() {
+                fields.push_str(&format!(
+                    "    {}    call $__wasi_deserialize_{} local.set $item\n    local.get $data i32.const {} i32.add local.get $item i32.store\n",
+                    wasi_expect_literal(&format!("{} ", field.name)).replace('\n', "\n    "),
+                    wasi_serde_name(&field.typ),
+                    index * 4,
+                ));
+            }
+            format!(
+                "{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $data i32) (local $item i32)\n    {}    i32.const {} i32.const {} call $record_new_i32 local.set $out\n{ref_map}    local.get $out i32.const 16 i32.add i32.load local.set $data\n{fields}    i32.const 125 call $__deser_expect\n    local.get $out)\n",
+                wasi_expect_literal(&format!("{}{{ ", record.name)).replace('\n', "\n    "),
+                record.fields.len(),
+                ref_words.len(),
+            )
+        }
         Type::Enum(enum_type) => {
-            let body = emit_wasi_enum_deserializer(&enum_type.variants);
+            if enum_type.boxed {
+                let variants = enum_type.variants();
+                let mut nested = String::new();
+                for variant in &variants {
+                    for field in &variant.fields {
+                        nested.push_str(&emit_wasi_deserializer(&field.typ, emitted)?);
+                    }
+                }
+                let mut branches = String::new();
+                for (tag, variant) in variants.iter().enumerate() {
+                    let ref_words = enum_ref_bitmap_words(variant);
+                    let mut ref_map = String::new();
+                    for (index, word) in ref_words.iter().enumerate() {
+                        ref_map.push_str(&format!(
+                            "      local.get $out i32.const 24 i32.add i32.load i32.const {} i32.add i32.const {} i32.store\n",
+                            index * 4, *word as i32
+                        ));
+                    }
+                    let mut fields = String::new();
+                    for (index, field) in variant.fields.iter().enumerate() {
+                        fields.push_str(&format!(
+                            "      call $__wasi_deserialize_{} local.set $item\n      local.get $data i32.const {} i32.add local.get $item i32.store\n",
+                            wasi_serde_name(&field.typ), index * 4
+                        ));
+                    }
+                    branches.push_str(&format!(
+                        "    local.get $tag i32.const {tag} i32.eq\n    if (result i32)\n      i32.const {tag} i32.const {} i32.const {} call $enum_new_i32 local.set $out\n{ref_map}      local.get $out i32.const 16 i32.add i32.load local.set $data\n{fields}      i32.const 125 call $__deser_expect\n      local.get $out\n    else\n",
+                        variant.fields.len(), ref_words.len(),
+                    ));
+                }
+                branches.push_str("      unreachable\n");
+                for _ in &variants { branches.push_str("    end\n"); }
+                let names = variants.iter().map(|variant| variant.name.clone()).collect::<Vec<_>>();
+                return Ok(format!(
+                    "{nested}  (func $__wasi_deserialize_{name} (result i32)\n    (local $out i32) (local $data i32) (local $item i32) (local $tag i32) (local $c i32)\n    {}    {}\n    local.set $tag\n{branches}  )\n",
+                    wasi_expect_literal(&format!("{}{{ ", enum_type.name)).replace('\n', "\n    "),
+                    emit_wasi_enum_deserializer(&names).replace('\n', "\n    "),
+                ));
+            }
+            let names = enum_type.variants().into_iter().map(|variant| variant.name).collect::<Vec<_>>();
+            let body = emit_wasi_enum_deserializer(&names);
             format!("  (func $__wasi_deserialize_{name} (result i32)\n    (local $c i32)\n{}\n  )\n", body.replace('\n', "\n    "))
         }
         Type::Var(_) | Type::Function(_, _) => return Err("unsupported WASI deserialization type".into()),
@@ -14022,8 +15962,12 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         tmp_i32: ctx.tmp_i32 + 4,
     };
     let arg_code = compile_expr(arg, &nested_ctx)?;
-    let wasi_host = wasi_bool("QUE_WASI_HOST");
-    if wasi_host && op == "serialize" {
+    // The serializer/deserializer is ordinary guest Wasm; it does not depend
+    // on WASI itself. Native wasm2c builds opt into it so records and payload
+    // enums use this one implementation rather than the old, narrower C host
+    // codec.
+    let guest_serde = wasi_bool("QUE_WASI_HOST") || parse_env_bool_like("QUE_GUEST_SERDE", false);
+    if guest_serde && op == "serialize" {
         let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
         let mut out = vec![
             format!("{arg_code}\nlocal.set {arg_slot}"),
@@ -14041,7 +15985,7 @@ fn compile_serde_call(node: &TypedExpression, op: &str, ctx: &Ctx<'_>) -> Result
         out.push(format!("local.get {result_slot}"));
         return Ok(out.join("\n"));
     }
-    if wasi_host && op == "deserialize" {
+    if guest_serde && op == "deserialize" {
         let release_arg = should_release_set_rhs(arg, ctx.lambda_bindings);
         let mut out = vec![
             format!("{arg_code}\nlocal.set {arg_slot}"),
@@ -14348,7 +16292,18 @@ fn compile_dynamic_call(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String,
         .children
         .first()
         .ok_or_else(|| "call missing function".to_string())?;
-    let f = compile_expr(f_node, ctx)?;
+    // A partial dynamic call allocates its closure in `ctx.tmp_i32`.  The
+    // function expression may itself need scratch storage (for example an
+    // accessor applied to a cached top-level record), so reserve the closure
+    // and transfer scratch slots before compiling it.  Otherwise evaluating
+    // that expression can overwrite the newly allocated partial closure.
+    let f = compile_expr(
+        f_node,
+        &Ctx {
+            tmp_i32: ctx.tmp_i32 + 2,
+            ..ctx.clone()
+        },
+    )?;
     let args = &node.children[1..];
     let head_ty = f_node
         .typ
@@ -14606,6 +16561,11 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                     Ok(format!("local.get {}", local_idx))
                 } else if w == "ARGV" {
                     Ok("call $__argv_get".to_string())
+                } else if matches!(node.typ.as_ref(), Some(Type::Enum(enum_type)) if enum_type.boxed && enum_type.variant(w).is_some())
+                {
+                    // A nullary payload-enum case is a generated constructor,
+                    // not a cached top-level binding.
+                    Ok(format!("call ${}", ident(w)))
                 } else if let Some(borrowed) =
                     compile_borrowed_top_level_cached_ref(w, ctx, ctx.tmp_i32)
                 {
@@ -14627,9 +16587,9 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                     // only an otherwise-unbound enum-typed word is a variant
                     // constructor.
                     let tag = enum_type
-                        .variants
+                        .variants()
                         .iter()
-                        .position(|variant| variant == w)
+                        .position(|variant| variant.name == *w)
                         .ok_or_else(|| format!("Unknown enum variant '{}'", w))?;
                     Ok(format!("i32.const {}", tag))
                 } else if let Some(tag) = builtin_fn_tag(w) {
@@ -14684,6 +16644,17 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                 compile_call(node, op_full, ctx)
                             }
                         }
+                        _ if enum_constructor_variant(node).is_some() => {
+                            compile_enum_constructor(node, ctx)
+                        }
+                        _ if record_constructor_type(node).is_some() => {
+                            compile_record_constructor(node, ctx)
+                        }
+                        _ if record_accessor_index(node).is_some() => compile_record_accessor(
+                            node,
+                            record_accessor_index(node).expect("record accessor was checked"),
+                            ctx,
+                        ),
                         "lambda" => compile_lambda_literal(node, ctx),
                         "do" => compile_do(items, node, ctx),
                         "if" => compile_if(node, ctx),
@@ -14744,7 +16715,7 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                             )?;
                             Ok(emit_direct_builder_scalar_store_i32(&xs, &idx, &value, ctx))
                         }
-                        "extern" | "sig" | "enum" => Ok("i32.const 0".to_string()),
+                        "extern" | "sig" | "enum" | "record" => Ok("i32.const 0".to_string()),
                         "integers" | "bools" | "decimals" | "strings" => {
                             compile_trusted_typed_vector_literal(op_full, node, ctx)
                         }
@@ -14781,6 +16752,15 @@ fn compile_expr(node: &TypedExpression, ctx: &Ctx<'_>) -> Result<String, String>
                                     return Err("car missing return type".to_string());
                                 }
                             };
+                            if node
+                                .children
+                                .get(1)
+                                .and_then(|xs| xs.typ.as_ref())
+                                .and_then(packed_scalar_record_vector)
+                                .is_some()
+                            {
+                                return Ok(format!("{xs}\ni32.const 0\ncall $vec_get_packed_record_i32"));
+                            }
                             if static_proof_is_safe(
                                 crate::static_analysis::ProofKind::NonEmpty,
                                 &node.expr,
@@ -15050,8 +17030,7 @@ fn non_owning_borrowed_local_names(
     let Expression::Apply(items) = &body.expr else {
         return borrowed;
     };
-    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block")
-    {
+    if !matches!(items.first(), Some(Expression::Word(op)) if op == "do" || op == "block") {
         return borrowed;
     }
     let child_offset = usize::from(body.children.len() + 1 == items.len());
@@ -16637,6 +18616,32 @@ fn compile_program_to_wat_build_typed_with_opts(
             top_level_lambda_key_to_name.insert(def.node.expr.to_lisp(), name.clone());
         }
     }
+    // A record declaration introduces ordinary callable constructor/accessor
+    // values as well as the direct construction/access lowering.  Register
+    // their signatures before function IDs and partial-application helpers
+    // are computed, so `(let make Point)`, `(Point 1)`, and `(map Point xs)`
+    // follow exactly the same first-class path as user functions.
+    let mut record_types = BTreeMap::new();
+    collect_record_types(typed_ast, &mut record_types);
+    for record in record_types.values() {
+        fn_sigs.insert(record.name.clone(), record_constructor_signature(record));
+        for field in &record.fields {
+            fn_sigs.insert(
+                format!("{}/{}", record.name, field.name),
+                record_accessor_signature(field, record),
+            );
+        }
+    }
+    let mut enum_types = BTreeMap::new();
+    collect_enum_types(typed_ast, &mut enum_types);
+    for enum_type in enum_types.values().filter(|enum_type| enum_type.boxed) {
+        for variant in enum_type.variants() {
+            fn_sigs.insert(
+                variant.name.clone(),
+                enum_constructor_signature(enum_type, &variant),
+            );
+        }
+    }
     for extern_decl in used_extern_defs.values() {
         let (mut ps, ret) = function_parts(&extern_decl.typ);
         if ps.len() == 1 && matches!(ps[0], Type::Unit) {
@@ -16736,8 +18741,7 @@ fn compile_program_to_wat_build_typed_with_opts(
                         .iter()
                         .filter(|capture| {
                             definitely_materialized_main_scalar_names.contains(*capture)
-                                || definitely_materialized_top_level_scalar_names
-                                    .contains(*capture)
+                                || definitely_materialized_top_level_scalar_names.contains(*capture)
                         })
                         .cloned()
                         .collect()
@@ -16913,6 +18917,18 @@ fn compile_program_to_wat_build_typed_with_opts(
         })
         .collect::<HashSet<_>>();
 
+    for record in record_types.values() {
+        emitted_funcs.push(compile_record_constructor_func(record));
+        for (field_index, _) in record.fields.iter().enumerate() {
+            emitted_funcs.push(compile_record_accessor_func(record, field_index));
+        }
+    }
+    for enum_type in enum_types.values().filter(|enum_type| enum_type.boxed) {
+        for (tag, variant) in enum_type.variants().iter().enumerate() {
+            emitted_funcs.push(compile_enum_constructor_func(enum_type, variant, tag));
+        }
+    }
+
     for (name, def) in &top_defs {
         if partial_helpers.iter().any(|h| h.binding_name == *name) {
             continue;
@@ -17058,6 +19074,29 @@ fn compile_program_to_wat_build_typed_with_opts(
         tmp_i32: main_local_defs.len() + main_borrowed_top_level_count,
     };
     let main_code = compile_expr(&main_node, &main_ctx)?;
+    // wasm2c's small C host deliberately does not reimplement Calque's
+    // nominal record and payload-enum layouts.  For native executables, turn
+    // the final value into the same text representation used by the guest
+    // serializer and let the host print that character vector.
+    let native_result_serialize = parse_env_bool_like("QUE_NATIVE_RESULT_SERIALIZE", false)
+        && !matches!(main_ret_ty, Type::Function(_, _));
+    let main_result_code = if native_result_serialize {
+        let release_value = if is_managed_local_type(main_ret_ty) {
+            format!(
+                "\nlocal.get $native_result_value\ncall {}\ndrop",
+                rc_release_for_type(main_ret_ty)
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "{main_code}\nlocal.set $native_result_value\nlocal.get $native_result_value\ncall $__wasi_serialize_{}{}",
+            wasi_serde_name(main_ret_ty),
+            release_value,
+        )
+    } else {
+        main_code.clone()
+    };
     let mut apply_arities: HashSet<usize> = HashSet::new();
     for func in &emitted_funcs {
         collect_apply_arities_from_code(func, &mut apply_arities);
@@ -17076,7 +19115,7 @@ fn compile_program_to_wat_build_typed_with_opts(
     let main_base_local_count = main_local_defs.len() + main_borrowed_top_level_count;
     let main_scratch_i32_locals = scratch_i32_locals_needed(
         main_base_local_count,
-        &[&main_borrowed_top_level_prelude, &main_code],
+        &[&main_borrowed_top_level_prelude, &main_result_code],
         false,
     );
 
@@ -17096,6 +19135,11 @@ fn compile_program_to_wat_build_typed_with_opts(
     }
     emit_i32_locals(&mut main_func, main_borrowed_top_level_count);
     emit_i32_locals(&mut main_func, main_scratch_i32_locals);
+    // This comes after all indexed locals so it cannot disturb the local-slot
+    // numbering already embedded in generated expression code.
+    if native_result_serialize {
+        main_func.push_str("    (local $native_result_value i32)\n");
+    }
     if !main_borrowed_top_level_prelude.is_empty() {
         main_func.push_str(&format!(
             "    {}\n",
@@ -17105,7 +19149,10 @@ fn compile_program_to_wat_build_typed_with_opts(
     if wasi_codegen && uses_argv {
         main_func.push_str("    call $__wasi_init_argv\n    drop\n");
     }
-    main_func.push_str(&format!("    {}\n", main_code.replace('\n', "\n    ")));
+    main_func.push_str(&format!(
+        "    {}\n",
+        main_result_code.replace('\n', "\n    ")
+    ));
     main_func.push_str("  )\n");
     if wasi_codegen {
         if wasi_no_result {
@@ -17373,7 +19420,13 @@ fn compile_program_to_wat_build_typed_with_opts(
             used_extern_defs.contains_key("read/lines!"),
         ));
     }
-    if wasi_host && (wasi_prints_result || generated_code.contains("call $__wasi_serialize_")) {
+    let guest_serde =
+        wasi_host || parse_env_bool_like("QUE_GUEST_SERDE", false) || native_result_serialize;
+    if guest_serde
+        && (wasi_prints_result
+            || native_result_serialize
+            || generated_code.contains("call $__wasi_serialize_"))
+    {
         let scale = decimal_scale_i64();
         let digits = scale.to_string().len().saturating_sub(1);
         extern_imports.push_str(
@@ -17383,12 +19436,21 @@ fn compile_program_to_wat_build_typed_with_opts(
         );
         let mut types = Vec::new();
         collect_wasi_serialize_types(typed_ast, &mut types);
-        if wasi_prints_result
-            && !matches!(
-                main_ret_ty,
-                Type::Char | Type::Unit | Type::Var(_) | Type::Function(_, _)
-            )
-            && !matches!(main_ret_ty, Type::List(inner) if matches!(inner.as_ref(), Type::Char))
+        // WASI renders Char, (), and [Char] directly in `_start`, so it has
+        // no need for a specialized serializer for those result types.
+        // Native wasm2c rendering instead converts *every* non-function
+        // result to a character vector before the C host prints it.  Keep the
+        // two paths distinct: omitting [Char] here made `(serialize value)`
+        // compile a call to its serializer without ever defining that helper.
+        let main_result_needs_serializer = native_result_serialize
+            || (wasi_prints_result
+                && !matches!(
+                    main_ret_ty,
+                    Type::Char | Type::Unit | Type::Var(_) | Type::Function(_, _)
+                )
+                && !matches!(main_ret_ty, Type::List(inner) if matches!(inner.as_ref(), Type::Char)));
+        if main_result_needs_serializer
+            && !matches!(main_ret_ty, Type::Function(_, _))
             && !types.iter().any(|existing| existing == main_ret_ty)
         {
             types.push(main_ret_ty.clone());
@@ -17398,7 +19460,7 @@ fn compile_program_to_wat_build_typed_with_opts(
             extern_imports.push_str(&emit_wasi_serializer(&typ, &mut emitted)?);
         }
     }
-    if wasi_host && generated_code.contains("call $__wasi_deserialize_") {
+    if guest_serde && generated_code.contains("call $__wasi_deserialize_") {
         let scale = decimal_scale_i64();
         let digits = scale.to_string().len().saturating_sub(1);
         extern_imports.push_str(
@@ -17426,7 +19488,13 @@ fn compile_program_to_wat_build_typed_with_opts(
         ));
     }
 
-    let runtime_body = emit_vector_runtime(&fn_ids, &fn_sigs, &closure_defs, &apply_arities);
+    let runtime_body = emit_vector_runtime(
+        &fn_ids,
+        &fn_sigs,
+        &closure_defs,
+        &apply_arities,
+        typed_ast_uses_packed_scalar_record_vectors(typed_ast),
+    );
     let (generic_runtime_body, apply_runtime_body) =
         split_generic_runtime_and_apply_runtime(&runtime_body);
     let mut emitted_funcs_body = String::new();

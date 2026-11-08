@@ -34,6 +34,14 @@ EOF
 "$repo/scripts/compile-native-c.sh" "$tmp/serde.que" "$tmp/serde" >/dev/null
 test "$("$tmp/serde/main")" = '"{ 42 { [true false] \"hello\" } }"'
 
+cat > "$tmp/payload-serde.que" <<'EOF'
+(do
+  (enum Tree Empty (Node value Int left Tree right Tree))
+  (serialize (Node 4 Empty Empty)))
+EOF
+"$repo/scripts/compile-native-c.sh" "$tmp/payload-serde.que" "$tmp/payload-serde" >/dev/null
+test "$("$tmp/payload-serde/main")" = '"Tree{ Node 4 Tree{ Empty } Tree{ Empty } }"'
+
 cat > "$tmp/stream.txt" <<'EOF'
 abcdef
 EOF

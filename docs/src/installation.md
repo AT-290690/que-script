@@ -78,7 +78,22 @@ quelsp --help
 
 The VS Code extension uses `quelsp` from `PATH` by default. To choose a
 specific executable, set `que.languageServer.path` to its full path. The
-included Neovim integration also looks for `quelsp` on `PATH`.
+included Neovim and Emacs integrations also look for `quelsp` on `PATH`.
+
+### Emacs
+
+Emacs 29.1+ is supported through the built-in Eglot client. The mode supplies
+Calque syntax highlighting, indentation, formatting, run commands, and Eglot
+diagnostics, inferred-type hover, completion, signatures, and definitions.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AT-290690/que-script/main/scripts/install-emacs.sh | bash
+```
+
+Then add the printed `load-path` and `(require 'que-mode)` forms to your Emacs
+init file. The installer does not rewrite an existing init file. See
+[`miscs/emacs/README.md`](https://github.com/AT-290690/que-script/blob/main/miscs/emacs/README.md)
+for configuration and command bindings.
 
 For the managed Neovim workstation on a fresh Linux machine—Calque, `quelsp`,
 Wasmtime, Neovim, Telescope, Catppuccin, and the Calque setup—use:

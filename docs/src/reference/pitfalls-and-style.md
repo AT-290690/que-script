@@ -19,8 +19,9 @@ arithmetic invariants are established, then benchmark the real workload.
 - `deserialize` needs a concrete expected result type; put `sig` immediately
   before its binding.
 - Use `=~` rather than `=` for values from an enum.
-- `Table/get` exposes an entry-vector form. Prefer `Table/get*` or
-  `Table/get-unsafe` after `Table/has?` if you want a value.
+- `Table/get` exposes an entry-vector form. Prefer `Table/get*` and match on
+  `None`/`Some`, or use `Table/get-unsafe` after `Table/has?` if you want a
+  value.
 
 ## Style
 

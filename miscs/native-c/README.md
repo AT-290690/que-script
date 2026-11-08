@@ -28,7 +28,12 @@ Implemented imports:
 - `write!`, `mkdir!`, `move!`, `delete!`
 - `sleep!`, `time!`, `random!`
 - `read/chunks!`, `stdin/chunks!`, `read/lines!`
-- `serialize`, `deserialize`
+
+`serialize` and `deserialize` are not host imports: the native build script
+selects Calque's generated guest codec, shared with the WASI path. This covers
+records and payload enums as well as scalars, vectors, and tuples.
+The same codec renders a native program's final result, so returning a record
+or payload enum directly is supported too.
 
 Non-option executable arguments populate Calque's `ARGV`. Use `--` when a program
 argument itself begins with an option-like prefix.
