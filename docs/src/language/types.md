@@ -22,6 +22,17 @@ Strings are `[Char]`. This makes string operations ordinary vector-oriented
 operations at the language level; it does **not** mean strings are a packed
 UTF-8 byte array in the current runtime representation.
 
+The standard library also provides the generic enum `(Option T)` with `None`
+and `(Some value)`. Safe lookups use it to represent a present value or a
+missing one without a sentinel value:
+
+```que
+(match (Vector/get* 1 [10 20])
+  None 0
+  (Some value) value)
+; 20
+```
+
 ```que
 (let count 3)              ; Int
 (let ready? true)          ; Bool
@@ -52,6 +63,16 @@ the generated accessors, then checks that the value really is that record:
 ```
 
 Use `_` to skip a field: `(let (Point x _) origin)`.
+
+Use `(field local-name)` when the field needs a different local binding—for
+example, because it would collide with a standard function:
+
+```que
+(record Pair first Int second Int)
+(let pair (Pair 3 4))
+(let (Pair (first left) (second right)) pair)
+(+ left right) ; 7
+```
 
 The declaration syntax is flat: `(record Name field Type ...)`. It creates a
 constructor named `Name` and a typed accessor for every field, named
@@ -134,7 +155,7 @@ type at the deserialization boundary.
 ```que
 (record Pair T K first T second K)
 (sig restored (Pair Int [Char]))
-(let restored (deserialize "Pair{ first 3 second \"Calque\" }"))
+(let restored (deserialize "Pair{ first 3 second \"Calque\"}"))
 ```
 
 Deserialization is strict: missing or malformed numeric fields trap instead of

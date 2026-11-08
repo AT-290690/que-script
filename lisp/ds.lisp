@@ -1680,9 +1680,10 @@ q)))
 (let Vector/first first)
 (let Vector/pull! pop-val!)
 (let Vector/get-unsafe (lambda idx xs (get idx xs)))
-(let Vector/get* (lambda idx xs (if (and (>= idx 0) (< idx (length xs))) { true [(get idx xs)] } { false [] })))
+(let Vector/get* get*)
 (let Vector/at-unsafe (lambda idx xs (at idx xs)))
-(let Vector/at* (lambda idx xs (if (< idx (length xs)) { true [(at idx xs)] } { false [] })))
+(let Vector/at* at*)
+(let Vector/find* find*)
 (let Vector/set! (lambda i v xs (set! i v xs)))
 (let Vector/append! (lambda x xs (Vector/append/raw! x xs)))
 (let Vector/cons! (lambda x xs (Vector/cons/raw! x xs)))
@@ -1718,10 +1719,11 @@ q)))
 
 
 (let Table/get (lambda key table (Table/get/raw key table)))
-(let Table/get* (lambda key table
-  (if (Table/has/raw? key table)
-      { true [ (snd (get 0 (Table/get/raw key table))) ] }
-      { false [] })))
+(let Table/get* (lambda (key table)
+  (let hit (Table/get/raw key table))
+  (if (empty? hit)
+      None
+      (Some (snd (get 0 hit))))))
 (let Table/get-unsafe (lambda key table (snd (get 0 (Table/get/raw key table)))))
 
 (let Table/has? (lambda key table (Table/has/raw? key table)))

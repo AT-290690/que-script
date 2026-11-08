@@ -588,12 +588,19 @@ impl ServerState {
         let doc_sig = doc.symbol_types.get(&symbol).cloned();
         let global_sig = self.global_signature(&symbol);
         let enum_variant_sig = native_core::enum_variant_type_in_source(&doc.text, &symbol);
+        let source_constructor_call_sig = enum_variant_sig.as_ref().and_then(|_| {
+            self.inferred_enum_constructor_call_signature(
+                &doc.text,
+                &symbol,
+                to_core_range(symbol_range),
+            )
+        });
         let std_fallback_sig = if doc.user_bound_symbols.contains(&symbol) {
             None
         } else {
             self.infer_standalone_std_symbol_signature(&symbol)
         };
-        let type_info = (if doc.user_bound_symbols.contains(&symbol) {
+        let type_info = source_constructor_call_sig.or_else(|| if doc.user_bound_symbols.contains(&symbol) {
             occurrence_sig.or(scoped_sig).or(doc_sig).or(global_sig)
         } else if is_standalone_symbol_expr_at_range(&doc.text, symbol_range, &symbol) {
             std_fallback_sig.or(global_sig).or(scoped_sig).or(doc_sig)
@@ -970,6 +977,36 @@ impl ServerState {
         })
     }
 
+    fn inferred_enum_constructor_call_signature(
+        &self,
+        text: &str,
+        symbol: &str,
+        range: native_core::CoreRange,
+    ) -> Option<String> {
+        let (start, end) = native_core::direct_call_byte_range_at_range(text, symbol, range)?;
+        let call = text.get(start..end)?;
+        let probe_source = format!("{text}\n{call}");
+        self.with_core(|core| {
+            let program = que::parser::merge_std_and_program(&probe_source, core.std_defs.clone()).ok()?;
+            let (result, _) = que::infer::infer_with_builtins_typed(
+                &program,
+                (core.base_env.clone(), core.base_next_id),
+            )
+            .ok()?;
+            let Type::Enum(enum_type) = result else {
+                return None;
+            };
+            let variant = enum_type.variant(symbol)?;
+            let mut parts = variant
+                .fields
+                .into_iter()
+                .map(|field| field.typ.to_string())
+                .collect::<Vec<_>>();
+            parts.push(Type::Enum(enum_type).to_string());
+            Some(normalize_signature(&parts.join(" -> ")))
+        })
+    }
+
     fn analyze_text(&self, text: &str) -> Vec<Diagnostic> {
         self.analyze_text_for_doc_path(text, None).diagnostics
     }
@@ -996,16 +1033,15 @@ impl ServerState {
             .form_scoped_symbols
             .iter()
             .find(|form| range_contains_position(&form.range, position))?;
+        let occurrences = form.symbol_occurrence_types.get(symbol)?;
         let index = native_core::symbol_occurrence_index_in_range(
             &doc.text,
             symbol,
             to_core_range(symbol_range),
             to_core_range(form.range),
+            occurrences.len(),
         )?;
-        form.symbol_occurrence_types
-            .get(symbol)?
-            .get(index)
-            .cloned()
+        occurrences.get(index).cloned()
     }
 
     fn form_let_signatures_at<'a>(
@@ -1215,8 +1251,30 @@ fn build_base_environment(
     native_core::build_base_environment(std_defs)
 }
 
+#[cfg(not(test))]
 fn load_std_definitions() -> Vec<Expression> {
     native_core::load_std_definitions()
+}
+
+#[cfg(test)]
+fn load_std_definitions() -> Vec<Expression> {
+    current_source_std_definitions()
+}
+
+#[cfg(test)]
+fn current_source_std_definitions() -> Vec<Expression> {
+    let source_library = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        include_str!("../../lisp/const.lisp"),
+        include_str!("../../lisp/macros.lisp"),
+        include_str!("../../lisp/types.lisp"),
+        include_str!("../../lisp/fp.lisp"),
+        include_str!("../../lisp/ds.lisp"),
+    );
+    let ast =
+        que::parser::build_library(&source_library).expect("current source library should parse");
+    que::baked::ast_to_definitions(ast, "current source library")
+        .expect("current source library definitions should load")
 }
 
 fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<String> {
@@ -2208,6 +2266,32 @@ mod tests {
     }
 
     #[test]
+    fn native_hover_specializes_generic_constructor_per_occurrence() {
+        let source = r#"(enum Maybe T Nope (Just value T))
+(let a (Just 3))
+(let b (Just "x"))
+{(match a Nope 0 (Just n) n)
+ (match b Nope "" (Just n) n)}"#;
+        let state = test_server_state();
+        for (line, expected) in [
+            (1, "Just : Int -> (Maybe Int)"),
+            (2, "Just : [Char] -> (Maybe [Char])"),
+        ] {
+            let hover = state
+                .hover_for_text(source, Position::new(line, 10))
+                .expect("generic constructor hover");
+            let HoverContents::Markup(markup) = hover.contents else {
+                panic!("expected Markdown hover");
+            };
+            assert!(
+                markup.value.contains(expected),
+                "unexpected hover: {}",
+                markup.value
+            );
+        }
+    }
+
+    #[test]
     fn native_completions_include_payload_enum_constructor() {
         let state = test_server_state();
         let items = state.completion_items_for_text(
@@ -2447,18 +2531,7 @@ mod tests {
     }
 
     fn analyze_lsp_test_source(source: &str) -> DocAnalysis {
-        let source_library = format!(
-            "{}\n{}\n{}\n{}",
-            include_str!("../../lisp/const.lisp"),
-            include_str!("../../lisp/macros.lisp"),
-            include_str!("../../lisp/fp.lisp"),
-            include_str!("../../lisp/ds.lisp"),
-        );
-        let ast = que::parser::build_library(&source_library)
-            .expect("current source library should parse");
-        let defs = que::baked::ast_to_definitions(ast, "current source library")
-            .expect("current source library definitions should load");
-        let core = build_lsp_core_from_std_defs(defs);
+        let core = build_lsp_core_from_std_defs(current_source_std_definitions());
         analyze_document_text_safe(
             source,
             &[],

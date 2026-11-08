@@ -257,6 +257,63 @@ fn binding_name(expr: &Expression) -> Option<String> {
     }
 }
 
+fn collect_words(expr: &Expression, out: &mut std::collections::HashSet<String>) {
+    match expr {
+        Expression::Word(word) => {
+            out.insert(word.clone());
+        }
+        Expression::Apply(items) => {
+            for item in items {
+                collect_words(item, out);
+            }
+        }
+        Expression::Int(_) | Expression::Dec(_) => {}
+    }
+}
+
+fn enum_constructor_names(expr: &Expression) -> Vec<String> {
+    let Expression::Apply(items) = expr else {
+        return Vec::new();
+    };
+    let [Expression::Word(keyword), Expression::Word(_name), declarations @ ..] = &items[..] else {
+        return Vec::new();
+    };
+    if keyword != "enum" {
+        return Vec::new();
+    }
+
+    // This mirrors the parser's generic-prefix rule: a leading uppercase word
+    // is a type parameter only when a payload annotation uses it.
+    let mut annotation_words = std::collections::HashSet::new();
+    for declaration in declarations {
+        if let Expression::Apply(parts) = declaration {
+            for type_expr in parts.iter().skip(2).step_by(2) {
+                collect_words(type_expr, &mut annotation_words);
+            }
+        }
+    }
+    let generic_count = declarations
+        .iter()
+        .take_while(|declaration| {
+            matches!(declaration, Expression::Word(word)
+                if word.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+                    && annotation_words.contains(word))
+        })
+        .count();
+
+    declarations[generic_count..]
+        .iter()
+        .filter_map(|declaration| match declaration {
+            Expression::Word(name) => Some(name.clone()),
+            Expression::Apply(parts) => match parts.first() {
+                Some(Expression::Word(name)) => Some(name.clone()),
+                _ => None,
+            },
+            Expression::Int(_) | Expression::Dec(_) => None,
+        })
+        .collect()
+}
+
 fn wildcard_match(pattern: &str, text: &str) -> bool {
     let (pattern, text) = (pattern.as_bytes(), text.as_bytes());
     let mut matches = vec![vec![false; text.len() + 1]; pattern.len() + 1];
@@ -296,6 +353,11 @@ fn library_symbols() -> Result<(BTreeMap<String, LibrarySymbol>, Vec<Expression>
         }
     }
     for definition in &definitions {
+        for name in enum_constructor_names(definition) {
+            if !name.starts_with('_') && !name.starts_with("std/") {
+                symbols.insert(name, LibrarySymbol::Source(definition.clone()));
+            }
+        }
         let Some(name) = binding_name(definition) else {
             continue;
         };

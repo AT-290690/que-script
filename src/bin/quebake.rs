@@ -99,7 +99,13 @@ fn parse_definitions_only(source: &str, label: &str) -> Result<Vec<Expression>, 
                 item.to_lisp()
             ));
         };
-        if kw != "let" && kw != "letrec" && kw != "letmacro" && kw != "mut" {
+        if kw != "let"
+            && kw != "letrec"
+            && kw != "letmacro"
+            && kw != "mut"
+            && kw != "enum"
+            && kw != "record"
+        {
             return Err(format!(
                 "'{}' must contain only top-level definitions; found '{}' at form {}",
                 label, kw, idx
@@ -124,6 +130,7 @@ fn base_library_defs() -> Result<Vec<Expression>, String> {
     for path in [
         "./lisp/const.lisp",
         "./lisp/macros.lisp",
+        "./lisp/types.lisp",
         "./lisp/fp.lisp",
         "./lisp/ds.lisp",
     ] {
@@ -136,8 +143,8 @@ fn usage(bin_name: &str) -> String {
     format!(
         "Usage: {bin} [--bundle <helpers.que> [more.que ...]] [helpers.que ...] [--out <que-lib.lisp>]\n\
          \n\
-         Bakes const/macros/fp/ds plus optional helper bundles into an external library file.\n\
-         Helper bundles must contain only top-level definitions (let/letrec/letmacro/mut).\n\
+         Bakes const/macros/fp/types/ds plus optional helper bundles into an external library file.\n\
+         Helper bundles must contain only top-level definitions (let/letrec/letmacro/mut/enum/record).\n\
          Rebuild/reinstall binaries (and restart LSP/editor) after baking.\n\
          After install, helper bundle source files may be removed.\n\
          \n\

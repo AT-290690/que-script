@@ -18,6 +18,39 @@ fn collect_pattern_words(expr: &Expression, acc: &mut HashSet<String>) {
     }
 }
 
+/// Type hints are not runtime expressions, but a library declaration named in
+/// one still has to survive tree shaking.  In particular, `(sig value
+/// (Option Int))` is the only runtime-visible reference needed before a
+/// `deserialize` call constructs an Option.
+fn collect_type_hint_idents(expr: &Expression, acc: &mut HashSet<String>) {
+    match expr {
+        Expression::Word(word) if !matches!(word.as_str(), "_" | "->") => {
+            acc.insert(word.clone());
+        }
+        Expression::Apply(items) => {
+            for item in items {
+                collect_type_hint_idents(item, acc);
+            }
+        }
+        Expression::Int(_) | Expression::Dec(_) => {}
+        Expression::Word(_) => {}
+    }
+}
+
+fn collect_match_pattern_variant(pattern: &Expression, acc: &mut HashSet<String>) {
+    match pattern {
+        Expression::Word(name) if name != "_" => {
+            acc.insert(name.clone());
+        }
+        Expression::Apply(items) => {
+            if let Some(Expression::Word(name)) = items.first() {
+                acc.insert(name.clone());
+            }
+        }
+        Expression::Int(_) | Expression::Dec(_) | Expression::Word(_) => {}
+    }
+}
+
 fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut HashSet<String>) {
     match expr {
         Expression::Word(w) => {
@@ -43,8 +76,10 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                 if op == "do" {
                     for it in &exprs[1..] {
                         if let Expression::Apply(sig_items) = it {
-                            if matches!(sig_items.first(), Some(Expression::Word(w)) if w == "sig")
-                            {
+                            if matches!(sig_items.first(), Some(Expression::Word(w)) if w == "sig") {
+                                if let Some(type_hint) = sig_items.get(2) {
+                                    collect_type_hint_idents(type_hint, acc);
+                                }
                                 continue;
                             }
                         }
@@ -103,6 +138,9 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     return;
                 }
                 if op == "sig" {
+                    if let Some(type_hint) = exprs.get(2) {
+                        collect_type_hint_idents(type_hint, acc);
+                    }
                     return;
                 }
                 if op == "enum" || op == "record" {
@@ -112,8 +150,15 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     if let Some(value) = exprs.get(1) {
                         collect_free_idents(value, bound, acc);
                     }
-                    for branch in exprs.iter().skip(3).step_by(2) {
-                        collect_free_idents(branch, bound, acc);
+                    for pair in exprs[2..].chunks_exact(2) {
+                        collect_match_pattern_variant(&pair[0], acc);
+                        let mut scoped = bound.clone();
+                        if let Expression::Apply(pattern) = &pair[0] {
+                            for binding in pattern.iter().skip(1) {
+                                collect_pattern_words(binding, &mut scoped);
+                            }
+                        }
+                        collect_free_idents(&pair[1], &mut scoped, acc);
                     }
                     return;
                 }
@@ -146,10 +191,65 @@ fn tree_shake(
 ) -> Vec<Expression> {
     let mut index = HashMap::new();
 
+    fn enum_annotation_words(expr: &Expression, out: &mut HashSet<String>) {
+        match expr {
+            Expression::Word(word) => {
+                out.insert(word.clone());
+            }
+            Expression::Apply(items) => {
+                for item in items {
+                    enum_annotation_words(item, out);
+                }
+            }
+            Expression::Int(_) | Expression::Dec(_) => {}
+        }
+    }
+
     // Index all std top-level definitions that bind a name.
     for expr in &std_defs {
         if let Expression::Apply(list) = expr {
             if let Some(Expression::Word(kw)) = list.first() {
+                if kw == "enum" {
+                    if let Some(Expression::Word(enum_name)) = list.get(1) {
+                        index.insert(enum_name.clone(), expr.clone());
+                    }
+                    // A constructor such as `Some` is introduced by an enum
+                    // declaration, not by its own top-level `let`. Index
+                    // each variant too, so a tree-shaken library retains
+                    // `(enum Option T None (Some value T))` when a helper
+                    // only refers to `Some` or `None`.
+                    let declarations = &list[2..];
+                    let mut annotation_words = HashSet::new();
+                    for declaration in declarations {
+                        if let Expression::Apply(parts) = declaration {
+                            for type_expr in parts.iter().skip(2).step_by(2) {
+                                enum_annotation_words(type_expr, &mut annotation_words);
+                            }
+                        }
+                    }
+                    let generic_count = declarations
+                        .iter()
+                        .take_while(|declaration| {
+                            matches!(declaration, Expression::Word(name)
+                                if name.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+                                    && annotation_words.contains(name))
+                        })
+                        .count();
+                    for declaration in declarations.iter().skip(generic_count) {
+                        match declaration {
+                            Expression::Word(name) => {
+                                index.insert(name.clone(), expr.clone());
+                            }
+                            Expression::Apply(parts) => {
+                                if let Some(Expression::Word(name)) = parts.first() {
+                                    index.insert(name.clone(), expr.clone());
+                                }
+                            }
+                            Expression::Int(_) | Expression::Dec(_) => {}
+                        }
+                    }
+                    continue;
+                }
                 let name = if kw == "extern" {
                     list.get(3)
                 } else {
@@ -163,11 +263,13 @@ fn tree_shake(
     }
 
     let mut kept = Vec::new();
+    let mut kept_sources = HashSet::new();
 
     fn visit(
         name: &str,
         index: &HashMap<String, Expression>,
         kept: &mut Vec<Expression>,
+        kept_sources: &mut HashSet<String>,
         visited: &mut HashSet<String>,
     ) {
         if !visited.insert(name.to_string()) {
@@ -181,17 +283,22 @@ fn tree_shake(
                         let mut scoped = HashSet::new();
                         collect_free_idents(&list[2], &mut scoped, &mut deps);
                         for dep in deps {
-                            visit(&dep, index, kept, visited);
+                            visit(&dep, index, kept, kept_sources, visited);
                         }
                     }
                 }
             }
-            kept.push(def.clone());
+            // Several names (the enum type and each of its constructors)
+            // can intentionally index the same declaration. Keep the form
+            // once even when a helper depends on more than one of them.
+            if kept_sources.insert(def.to_lisp()) {
+                kept.push(def.clone());
+            }
         }
     }
 
     for name in used {
-        visit(name, &index, &mut kept, visited);
+        visit(name, &index, &mut kept, &mut kept_sources, visited);
     }
 
     kept
@@ -1933,10 +2040,26 @@ fn destructure_pattern(
                     // its generated accessor (`Point/x`, `Point/y`); type
                     // inference then verifies that the record and fields
                     // actually exist and match the value.
-                    if elements
+                    // A plain field name uses that same name for its local
+                    // binding.  `(field local-name)` explicitly aliases a
+                    // field, which matters when a field is named after an
+                    // existing global such as `first`.
+                    let record_fields = elements
                         .iter()
-                        .all(|element| matches!(element, Expression::Word(_)))
-                    {
+                        .map(|element| match element {
+                            Expression::Word(field_name) => {
+                                Some((field_name.as_str(), element))
+                            }
+                            Expression::Apply(parts) => match &parts[..] {
+                                [Expression::Word(field_name), binding] => {
+                                    Some((field_name.as_str(), binding))
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .collect::<Option<Vec<_>>>();
+                    if let Some(record_fields) = record_fields {
                         let mut bindings = vec![];
                         let temp_var = if let Expression::Word(name) = &value_expr {
                             name.clone()
@@ -1951,15 +2074,12 @@ fn destructure_pattern(
                             temp_var
                         };
 
-                        for field_pattern in elements {
-                            let Expression::Word(field_name) = field_pattern else {
-                                unreachable!("record patterns were checked to contain only names");
-                            };
-                            if field_name == "_" {
+                        for (field_name, binding_pattern) in record_fields {
+                            if field_name == "_" || matches!(binding_pattern, Expression::Word(name) if name == "_") {
                                 continue;
                             }
                             let (field_bindings, _) = destructure_pattern(
-                                field_pattern,
+                                binding_pattern,
                                 Expression::Apply(vec![
                                     Expression::Word(format!("{vector_kw}/{field_name}")),
                                     Expression::Word(temp_var.clone()),
@@ -2627,7 +2747,7 @@ fn destructuring_kind(pattern: &Expression) -> Option<DestructuringKind> {
         Expression::Apply(exprs) => match exprs.as_slice() {
             [Expression::Word(kw), ..] if kw == "tuple" => Some(DestructuringKind::Tuple),
             [Expression::Word(kw), ..] if kw == "vector" => Some(DestructuringKind::Vector),
-            [Expression::Word(_), Expression::Word(_), ..] => Some(DestructuringKind::Record),
+            [Expression::Word(_), _, ..] => Some(DestructuringKind::Record),
             _ => None,
         },
         _ => None,

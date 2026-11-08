@@ -145,6 +145,35 @@ fn infer_standalone_std_symbol_signature(core: &WasmLspCore, symbol: &str) -> Op
     Some(normalize_signature(&typ.to_string()))
 }
 
+/// Infer the concrete constructor signature for one source call.  Normal
+/// hover collection obtains this from the typed expression tree; this small
+/// fallback covers source-local generic enum declarations, whose declaration
+/// syntax intentionally does not produce typed word occurrences.
+fn inferred_enum_constructor_call_signature(
+    core: &WasmLspCore,
+    text: &str,
+    symbol: &str,
+    range: native_core::CoreRange,
+) -> Option<String> {
+    let (start, end) = native_core::direct_call_byte_range_at_range(text, symbol, range)?;
+    let call = text.get(start..end)?;
+    let probe_source = format!("{text}\n{call}");
+    let program = parser::merge_std_and_program(&probe_source, core.std_defs.clone()).ok()?;
+    let (result, _) =
+        infer_with_builtins_typed(&program, (core.base_env.clone(), core.base_next_id)).ok()?;
+    let Type::Enum(enum_type) = result else {
+        return None;
+    };
+    let variant = enum_type.variant(symbol)?;
+    let mut parts = variant
+        .fields
+        .into_iter()
+        .map(|field| field.typ.to_string())
+        .collect::<Vec<_>>();
+    parts.push(Type::Enum(enum_type).to_string());
+    Some(normalize_signature(&parts.join(" -> ")))
+}
+
 fn build_base_environment(
     std_defs: &[Expression],
 ) -> (
@@ -496,16 +525,15 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
             .iter()
             .find(|form| range_contains_position(form.range, position));
         let occurrence_sig = scoped_form.and_then(|form| {
+            let occurrences = form.symbol_occurrence_types.get(&symbol)?;
             let index = native_core::symbol_occurrence_index_in_range(
                 &text,
                 &symbol,
                 to_core_range(range),
                 to_core_range(form.range),
+                occurrences.len(),
             )?;
-            form.symbol_occurrence_types
-                .get(&symbol)?
-                .get(index)
-                .cloned()
+            occurrences.get(index).cloned()
         });
         let scoped_sig = scoped_form
             .and_then(|form| form.symbol_types.get(&symbol))
@@ -513,6 +541,13 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
         let doc_sig = analysis.symbol_types.get(&symbol).cloned();
         let global_sig = core.global_signatures.get(&symbol).cloned();
         let enum_variant_sig = native_core::enum_variant_type_in_source(&text, &symbol);
+        // A source-declared generic constructor needs its call-specific
+        // instantiation. The recovery tree has no expression annotation for
+        // enum declaration syntax, so infer this direct call as a fallback.
+        // Pattern heads are not calls and simply leave this as `None`.
+        let source_constructor_call_sig = enum_variant_sig.as_ref().and_then(|_| {
+            inferred_enum_constructor_call_signature(core, &text, &symbol, to_core_range(range))
+        });
         let std_fallback_sig = if analysis.user_bound_symbols.contains(&symbol) {
             None
         } else if core.std_fallback_names.contains(&symbol) {
@@ -520,7 +555,9 @@ pub fn lsp_hover(text: String, line: u32, character: u32) -> String {
         } else {
             None
         };
-        let type_info = if analysis.user_bound_symbols.contains(&symbol) {
+        let type_info = if let Some(signature) = source_constructor_call_sig {
+            Some(signature)
+        } else if analysis.user_bound_symbols.contains(&symbol) {
             occurrence_sig.or(scoped_sig).or(doc_sig).or(global_sig)
         } else {
             if is_standalone_symbol_expr_at_range(&text, range, &symbol) {

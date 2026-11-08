@@ -2209,10 +2209,7 @@ fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
         }),
         // Public aliases are not lowered as core primitives, so they retain
         // their source-level data-last parameter positions.
-        "std/vector/push!"
-        | "std/vector/append!"
-        | "std/vector/push-and-get!"
-        | "Vector/push!"
+        "Vector/push!"
         | "Vector/append!"
         | "Que/push!"
         | "Que/enque!"
@@ -2230,7 +2227,7 @@ fn builtin_storage_summary(name: &str) -> Option<StorageSummary> {
             target_param: 0,
             value_param: 2,
         }),
-        "std/vector/set!" | "std/vector/update!" | "Vector/set!" => Some(StorageSummary {
+        "Vector/set!" => Some(StorageSummary {
             target_param: 2,
             value_param: 1,
         }),
@@ -15559,6 +15556,39 @@ fn emit_wasi_serializer(typ: &Type, emitted: &mut HashSet<String>) -> Result<Str
             }
             body.push_str("    local.get $out)\n");
             format!("  (func $__wasi_serialize_{name} (param i32) (result i32)\n{body}")
+        }
+        Type::List(inner) if packed_scalar_record_vector(typ).is_some() => {
+            // A scalar record vector stores each record's fields inline, not
+            // pointers to separately allocated records.  The ordinary vector
+            // serializer below would pass its first inline field (for example
+            // `Point/y`) to the record serializer as though it were a record
+            // pointer, producing believable but bogus zero-valued records at
+            // the WASI boundary.  Serialize the inline fields directly.
+            let Type::Record(record) = inner.as_ref() else {
+                unreachable!("packed record vectors always contain records");
+            };
+            let mut nested = String::new();
+            for field in &record.fields {
+                nested.push_str(&emit_wasi_serializer(&field.typ, emitted)?);
+            }
+            let field_count = record.fields.len();
+            let mut fields = String::new();
+            for (index, field) in record.fields.iter().enumerate() {
+                fields.push_str(&format!(
+                    "      {}\n      local.get $data\n      local.get $i\n      i32.const {field_count}\n      i32.mul\n      i32.const {index}\n      i32.add\n      i32.const 4\n      i32.mul\n      i32.add\n      i32.load\n      call $__wasi_serialize_{}\n      local.set $tmp\n      local.get $out\n      local.get $tmp\n      call $__serde_append\n      local.get $tmp\n      call $rc_release_vec\n      drop\n",
+                    wasi_append_literal("$out", &format!("{} ", field.name))
+                        .replace('\n', "\n      "),
+                    wasi_serde_name(&field.typ),
+                ));
+                if index + 1 < field_count {
+                    fields.push_str("      local.get $out i32.const 32 call $vec_push_i32 drop\n");
+                }
+            }
+            format!(
+                "{nested}  (func $__wasi_serialize_{name} (param $value i32) (result i32)\n    (local $out i32) (local $len i32) (local $data i32) (local $i i32) (local $tmp i32)\n    i32.const 0 i32.const 0 call $vec_new_i32 local.set $out\n    local.get $out i32.const 91 call $vec_push_i32 drop\n    local.get $value i32.load local.set $len\n    local.get $value i32.const 16 i32.add i32.load local.set $data\n    block $done loop $items\n      local.get $i local.get $len i32.ge_u br_if $done\n      local.get $i i32.const 0 i32.gt_u if local.get $out i32.const 32 call $vec_push_i32 drop end\n      {}\n{fields}      local.get $out i32.const 32 call $vec_push_i32 drop\n      local.get $out i32.const 125 call $vec_push_i32 drop\n      local.get $i i32.const 1 i32.add local.set $i br $items\n    end end\n    local.get $out i32.const 93 call $vec_push_i32 drop\n    local.get $out)\n",
+                wasi_append_literal("$out", &format!("{}{{ ", record.name))
+                    .replace('\n', "\n      "),
+            )
         }
         Type::List(inner) => {
             let child = wasi_serde_name(inner);

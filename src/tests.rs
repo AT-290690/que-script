@@ -204,6 +204,17 @@ xs)"#,
     }
 
     #[test]
+    fn test_wasi_result_renderer_serializes_packed_scalar_record_vectors() {
+        let source = r#"(do
+            (record Point y Int x Int)
+            [(Point 0 2) (Point 0 3) (Point 1 2)])"#;
+        assert_eq!(
+            run_program_output(source),
+            "[Point{ y 0 x 2 } Point{ y 0 x 3 } Point{ y 1 x 2 }]"
+        );
+    }
+
+    #[test]
     fn test_record_and_payload_enum_runtime_use_single_inline_allocation() {
         let expr = crate::parser::build(
             r#"(do
@@ -244,7 +255,6 @@ xs)"#,
     fn test_parameterized_records_and_enums_infer_independent_instantiations() {
         let source = r#"(do
             (record Pair T K first T second K)
-            (enum Option T None (Some value T))
             (enum Result T E (Ok value T) (Err error E))
             (let ints (Some 7))
             (let text (Some "calque"))
@@ -302,7 +312,6 @@ xs)"#,
         // accidentally specialized to whichever call happens to come first.
         let helpers = r#"(do
             (record Box T value T)
-            (enum Option T None (Some value T))
             (let box Box)
             (let unbox Box/value)
             (let some Some)
@@ -595,6 +604,17 @@ xs)"#,
             (let point (Point 3 4))
             (let (Point x y) point)
             (+ x y))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_record_destructuring_can_alias_fields_that_collide_with_globals() {
+        let source = r#"(do
+            (record Pair first Int second Int)
+            (let pair (Pair 3 4))
+            (let (Pair (first left) (second right)) pair)
+            (+ left right))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
     }
@@ -2774,6 +2794,41 @@ xs
             output_with_opts, output_no_opts,
             "optimizer output must match non-optimized output"
         );
+    }
+
+    #[test]
+    fn test_standard_option_lookup_apis_distinguish_present_and_missing_values() {
+        let source = r#"(do
+            (let xs [10 20 30])
+            (let table (Table/new))
+            (Table/set! "answer" 42 table)
+            {
+              (match (get* 1 xs) None -1 (Some value) value)
+              (match (Vector/get* 9 xs) None -1 (Some value) value)
+              (match (at* -1 xs) None -1 (Some value) value)
+              (match (Vector/at* -4 xs) None -1 (Some value) value)
+              (match (find* (lambda (value) (= value 20)) xs) None -1 (Some index) index)
+              (match (Vector/find* (lambda (value) (= value 99)) xs) None -1 (Some index) index)
+              (match (Table/get* "answer" table) None -1 (Some value) value)
+              (match (Table/get* "missing" table) None -1 (Some value) value)
+            })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ 20 { -1 { 30 { -1 { 1 { -1 { 42 -1 } } } } } } }"
+        );
+    }
+
+    #[test]
+    fn test_standard_option_type_hint_keeps_enum_for_deserialization() {
+        let source = r#"(do
+            (sig value (Option Int))
+            (let value (deserialize "Option{ Some 3 }"))
+            (match value
+              None 0
+              (Some item) item))"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "3");
     }
 
     #[test]
@@ -6767,6 +6822,29 @@ out"#,
                 .as_str()
                 .expect("payload enum hover contents");
             assert!(contents.contains(expected), "unexpected hover: {contents}");
+        }
+    }
+
+    #[test]
+    fn test_wasm_lsp_hover_specializes_generic_constructor_per_occurrence() {
+        // The trailing `Just` pattern is syntax rather than an evaluated
+        // occurrence, so it must not shift the two constructor calls above.
+        let source = r#"(enum Maybe T Nope (Just value T))
+(let a (Just 3))
+(let b (Just "x"))
+{(match a Nope 0 (Just n) n)
+ (match b Nope "" (Just n) n)}"#;
+        for (line, expected) in [
+            (1, "Just : Int -> (Maybe Int)"),
+            (2, "Just : [Char] -> (Maybe [Char])"),
+        ] {
+            let hover: serde_json::Value =
+                serde_json::from_str(&crate::wasm_api::lsp_hover(source.to_string(), line, 10))
+                    .expect("hover should be valid JSON");
+            let contents = hover["contents"]
+                .as_str()
+                .expect("generic constructor should have hover contents");
+            assert_eq!(contents, expected, "wrong hover on line {line}");
         }
     }
 
@@ -15075,7 +15153,7 @@ SECRET = SANTA")
   (parse/env .env)))
 
 (let option (Table/get* "PORT" ENV))
-(if (fst option) (get (snd option)) "")"#,
+(match option None "" (Some value) value)"#,
                 "8080",
             ),
 

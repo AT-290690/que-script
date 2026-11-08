@@ -14,12 +14,14 @@ table last, including mutating operations:
 (Table/get "Ada" scores)
 ```
 
-`Table/get` returns the table’s entry-vector form. Use `Table/get*` for a
-checked result or `Table/get-unsafe` when presence is already established:
+`Table/get` returns the table’s entry-vector form. `Table/get*` returns an
+`(Option V)` for a checked lookup; use `Table/get-unsafe` when presence is
+already established:
 
 ```que
-(let {found? values} (Table/get* "Ada" scores))
-(if found? (get 0 values) 0)
+(match (Table/get* "Ada" scores)
+  None 0
+  (Some score) score)
 
 (if (Table/has? "Ada" scores)
     (Table/get-unsafe "Ada" scores)

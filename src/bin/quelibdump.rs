@@ -239,6 +239,7 @@ fn collect_defs_from_file(path: &str, is_std: bool) -> io::Result<Vec<SymbolDef>
 fn build_final_symbol_defs(include_std: bool) -> io::Result<Vec<SymbolDef>> {
     let mut files = vec![
         ("./lisp/const.lisp", false),
+        ("./lisp/types.lisp", false),
         ("./lisp/fp.lisp", false),
         ("./lisp/ds.lisp", false),
     ];

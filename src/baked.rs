@@ -118,9 +118,10 @@ fn load_from_external_paths() -> Result<Option<Expression>, String> {
 #[cfg(target_arch = "wasm32")]
 fn load_embedded_wasm_library() -> Result<Expression, String> {
     let combined = format!(
-        "{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}",
         include_str!("../lisp/const.lisp"),
         include_str!("../lisp/macros.lisp"),
+        include_str!("../lisp/types.lisp"),
         include_str!("../lisp/fp.lisp"),
         include_str!("../lisp/ds.lisp")
     );
@@ -130,9 +131,10 @@ fn load_embedded_wasm_library() -> Result<Expression, String> {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 fn load_embedded_test_library() -> Result<Expression, String> {
     let combined = format!(
-        "{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}",
         include_str!("../lisp/const.lisp"),
         include_str!("../lisp/macros.lisp"),
+        include_str!("../lisp/types.lisp"),
         include_str!("../lisp/fp.lisp"),
         include_str!("../lisp/ds.lisp")
     );

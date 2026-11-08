@@ -113,13 +113,9 @@ equality; use `match` to inspect a payload variant.
 
 Payload enums can also take type parameters. This makes the type relationship
 between a payload and its enclosing variant explicit without giving up
-exhaustive matching:
+exhaustive matching. The standard library defines this common type already:
 
 ```que
-(enum Option T
-  None
-  (Some value T))
-
 (let read-or
   (lambda (fallback option)
     (match option

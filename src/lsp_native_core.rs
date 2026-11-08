@@ -260,6 +260,11 @@ pub fn build_base_environment(
     for (name, signature) in infer_std_signatures(&env, next_id, std_defs) {
         signatures.insert(name, normalize_signature(&signature));
     }
+    for (name, signature) in std_enum_constructor_signatures(std_defs) {
+        signatures
+            .entry(name)
+            .or_insert_with(|| normalize_signature(&signature));
+    }
     for (name, signature) in LSP_SPECIAL_KEYWORD_SIGNATURES {
         signatures
             .entry(name.to_string())
@@ -285,6 +290,27 @@ pub fn collect_std_top_level_let_names(std_defs: &[Expression]) -> HashSet<Strin
     let mut names = HashSet::new();
     for expr in std_defs {
         if let Expression::Apply(items) = expr {
+            if let [Expression::Word(keyword), Expression::Word(_enum_name), declared @ ..] =
+                &items[..]
+            {
+                if keyword == "enum" {
+                    let generic_count = source_enum_type_parameter_count(declared);
+                    for variant in &declared[generic_count..] {
+                        match variant {
+                            Expression::Word(name) => {
+                                names.insert(name.clone());
+                            }
+                            Expression::Apply(parts) => {
+                                if let Some(Expression::Word(name)) = parts.first() {
+                                    names.insert(name.clone());
+                                }
+                            }
+                            Expression::Int(_) | Expression::Dec(_) => {}
+                        }
+                    }
+                    continue;
+                }
+            }
             if let [Expression::Word(keyword), Expression::Word(_module), Expression::Word(_import), Expression::Word(name), _typ, ..] =
                 &items[..]
             {
@@ -333,6 +359,48 @@ pub fn infer_std_signatures(
         .into_iter()
         .map(|(name, typ)| (name, normalize_signature(&typ.to_string())))
         .collect()
+}
+
+fn std_enum_constructor_signatures(std_defs: &[Expression]) -> Vec<(String, String)> {
+    let mut signatures = Vec::new();
+    for definition in std_defs {
+        let Expression::Apply(items) = definition else {
+            continue;
+        };
+        let [Expression::Word(keyword), Expression::Word(enum_name), declared @ ..] = &items[..]
+        else {
+            continue;
+        };
+        if keyword != "enum" {
+            continue;
+        }
+        let generic_count = source_enum_type_parameter_count(declared);
+        let type_params = &declared[..generic_count];
+        let result = source_nominal_type(enum_name, type_params);
+        for variant in &declared[generic_count..] {
+            match variant {
+                Expression::Word(name) => signatures.push((name.clone(), result.clone())),
+                Expression::Apply(parts) => {
+                    let Some(Expression::Word(name)) = parts.first() else {
+                        continue;
+                    };
+                    if parts.len() < 3 || parts.len() % 2 == 0 {
+                        continue;
+                    }
+                    let mut signature = parts
+                        .iter()
+                        .skip(2)
+                        .step_by(2)
+                        .map(Expression::to_lisp)
+                        .collect::<Vec<_>>();
+                    signature.push(result.clone());
+                    signatures.push((name.clone(), signature.join(" -> ")));
+                }
+                Expression::Int(_) | Expression::Dec(_) => {}
+            }
+        }
+    }
+    signatures
 }
 
 pub fn infer_std_effects(
@@ -855,6 +923,7 @@ pub fn symbol_occurrence_index_in_range(
     symbol: &str,
     target: CoreRange,
     scope: CoreRange,
+    typed_occurrence_count: usize,
 ) -> Option<usize> {
     let at_or_after = |a: CorePosition, b: CorePosition| {
         a.line > b.line || (a.line == b.line && a.character >= b.character)
@@ -864,6 +933,10 @@ pub fn symbol_occurrence_index_in_range(
     };
     let ranges = find_symbol_ranges(text, symbol)
         .into_iter()
+        // Match patterns are syntax, not evaluated constructor occurrences.
+        // They have no entry in the typed occurrence sequence, so including
+        // them shifts every following call of the same constructor.
+        .filter(|range| !is_match_pattern_variant_at_range(text, *range))
         .filter(|range| at_or_after(range.start, scope.start) && at_or_before(range.end, scope.end))
         .collect::<Vec<_>>();
     let source_index = ranges
@@ -871,10 +944,10 @@ pub fn symbol_occurrence_index_in_range(
         .position(|range| range.start == target.start)?;
 
     let Some(target_byte) = position_to_byte_offset(text, target.start) else {
-        return Some(source_index);
+        return align_source_occurrence_index(source_index, ranges.len(), typed_occurrence_count);
     };
     let Some((pipe_open, pipe_close)) = direct_pipeline_stage_parent(text, target_byte) else {
-        return Some(source_index);
+        return align_source_occurrence_index(source_index, ranges.len(), typed_occurrence_count);
     };
     let mut pipeline_indices = Vec::new();
     for (index, range) in ranges.iter().enumerate() {
@@ -892,9 +965,79 @@ pub fn symbol_occurrence_index_in_range(
         .iter()
         .position(|index| *index == source_index)
     else {
-        return Some(source_index);
+        return align_source_occurrence_index(source_index, ranges.len(), typed_occurrence_count);
     };
-    Some(pipeline_indices[pipeline_indices.len() - 1 - pipeline_position])
+    align_source_occurrence_index(
+        pipeline_indices[pipeline_indices.len() - 1 - pipeline_position],
+        ranges.len(),
+        typed_occurrence_count,
+    )
+}
+
+/// Return the enclosing direct call when `range` is precisely the head word
+/// of a surface application such as `(Some value)`.  This deliberately works
+/// on source bytes (rather than the desugared AST) so editor features can use
+/// it for a still-untyped source document.
+pub fn direct_call_byte_range_at_range(
+    text: &str,
+    symbol: &str,
+    range: CoreRange,
+) -> Option<(usize, usize)> {
+    let target_start = position_to_byte_offset(text, range.start)?;
+    let target_end = position_to_byte_offset(text, range.end)?;
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+
+    while index < target_start {
+        match bytes[index] {
+            b';' => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+            }
+            b'"' => index = skip_string_literal(text, index, bytes.len()),
+            b'\'' => index = skip_char_literal(text, index, bytes.len()),
+            b'(' => {
+                let mut head_start = index + 1;
+                while head_start < bytes.len() && bytes[head_start].is_ascii_whitespace() {
+                    head_start += 1;
+                }
+                let mut head_end = head_start;
+                while head_end < bytes.len()
+                    && !bytes[head_end].is_ascii_whitespace()
+                    && !matches!(bytes[head_end], b'(' | b')' | b'[' | b']' | b'{' | b'}')
+                {
+                    head_end += 1;
+                }
+                if head_start == target_start
+                    && head_end == target_end
+                    && text.get(head_start..head_end) == Some(symbol)
+                {
+                    return find_matching_surface_list_end_byte(text, index)
+                        .map(|close| (index, close + 1));
+                }
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    None
+}
+
+/// The source has declaration names that deliberately do not appear as typed
+/// word occurrences: an enum constructor in `(enum Option T ... (Some ...))`,
+/// for example, is declared there but not called.  Typed occurrence collection
+/// consequently starts at the first executable use.  Declarations must not
+/// shift every later same-named hover to the wrong instantiation.
+fn align_source_occurrence_index(
+    source_index: usize,
+    source_occurrence_count: usize,
+    typed_occurrence_count: usize,
+) -> Option<usize> {
+    let declaration_only_prefix = source_occurrence_count.saturating_sub(typed_occurrence_count);
+    source_index
+        .checked_sub(declaration_only_prefix)
+        .filter(|index| *index < typed_occurrence_count)
 }
 
 fn direct_pipeline_stage_parent(text: &str, target: usize) -> Option<(usize, usize)> {
@@ -940,6 +1083,64 @@ fn direct_pipeline_stage_parent(text: &str, target: usize) -> Option<(usize, usi
     }
     let pipe_close = find_matching_paren_byte(text, pipe_open)?;
     Some((pipe_open, pipe_close))
+}
+
+/// Whether this range names an enum variant in a `match` pattern rather than
+/// an evaluated expression.  The inference tree intentionally records payload
+/// *bindings* in patterns but not their variant heads, so such heads cannot be
+/// aligned with executable word occurrences.
+fn is_match_pattern_variant_at_range(text: &str, range: CoreRange) -> bool {
+    let Some(target_start) = position_to_byte_offset(text, range.start) else {
+        return false;
+    };
+    let Some(target_end) = position_to_byte_offset(text, range.end) else {
+        return false;
+    };
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        index = match bytes[index] {
+            b';' => {
+                while index < bytes.len() && bytes[index] != b'\n' {
+                    index += 1;
+                }
+                continue;
+            }
+            b'"' => {
+                index = skip_string_literal(text, index, bytes.len());
+                continue;
+            }
+            b'\'' => {
+                index = skip_char_literal(text, index, bytes.len());
+                continue;
+            }
+            b'(' => index,
+            _ => {
+                index += 1;
+                continue;
+            }
+        };
+
+        let Some(close) = find_matching_surface_list_end_byte(text, index) else {
+            return false;
+        };
+        if list_head_at(text, index) == Some("match") {
+            let items = direct_list_item_ranges(text, index, close + 1);
+            for pattern in items.iter().skip(2).step_by(2) {
+                if *pattern == (target_start, target_end) {
+                    return true;
+                }
+                if text.as_bytes().get(pattern.0) == Some(&b'(') {
+                    let parts = direct_list_item_ranges(text, pattern.0, pattern.1);
+                    if parts.first().copied() == Some((target_start, target_end)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    false
 }
 
 fn list_head_at(text: &str, open: usize) -> Option<&str> {

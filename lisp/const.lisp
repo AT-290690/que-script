@@ -381,8 +381,6 @@
 (let UTF8/start-3? (lambda (b) (= (& b 240) 224)))
 (let UTF8/start-4? (lambda (b) (= (& b 248) 240)))
 
-(let get* (lambda i some none xs (if (in-bounds? i xs) (do (some (get i xs)) nil) (do (none) nil))))
-
 (let println! (lambda text (do
   (print! text)
   (print! ['\n']))))

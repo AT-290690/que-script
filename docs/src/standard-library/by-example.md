@@ -70,8 +70,9 @@ loop so the analyser can prove the access.
     (get index xs)
     fallback)
 
-(let {found? values} (Vector/get* index xs))
-(if found? (get 0 values) fallback)
+(match (Vector/get* index xs)
+  None fallback
+  (Some value) value)
 ```
 
 Mutation is direct and explicit:
@@ -235,6 +236,9 @@ true. They exist for `map`, `reduce`, and `for`, with index-aware `/i` forms.
 
 ```que
 (find (lambda (x) (> x 10)) [3 7 12 9]) ; 2, or -1 when absent
+(match (find* (lambda (x) (> x 10)) [3 7 12 9])
+  None -1
+  (Some index) index)                    ; 2
 (count odd? [1 2 3 4])                  ; 2
 (some? odd? [2 4 5])                    ; true
 (every? positive? [1 2 3])              ; true
@@ -403,7 +407,7 @@ they compose naturally with `|>`.
 ```
 
 `Table/get` returns the internal matching entry vector; prefer `Table/get*`
-for a `{found? values}` result or `Table/get-unsafe` after a `Table/has?`
+for a `(Option V)` result or `Table/get-unsafe` after a `Table/has?`
 check. `Table/remove!`, `Table/drop!`, `Table/merge!`, `Table/resize!`, and
 `Table/compact!` mutate; `Table/keep`, `Table/omit`, and `Table/merge` return
 new tables. `Table/count` and `Table/frequency` build counting tables.
