@@ -445,14 +445,26 @@ and `Que/prepend!` to add at either end; `Que/pop!` and `Que/tail!` remove;
 
 ## Big integers, dates, metadata, and options
 
-`BigInt/*` represents an unsigned arbitrary-precision integer as a digit
-vector; `SignedBigInt/*` uses `{Bool [Int]}`. Construct them from text and
-stay within the corresponding namespace for arithmetic:
+`BigInt` is a nominal record containing an unsigned arbitrary-precision digit
+sequence. `SignedBigInt` is a nominal record around a sign and a `BigInt`;
+`StructBigDec` adds an explicit decimal precision. Construct values through
+their namespaces and keep arithmetic there rather than passing raw digit
+vectors:
 
 ```que
 (let a (BigInt/new "999999999999999999"))
-(Digits->Chars (BigInt/add a (BigInt/new "1")))
+(Digits->Chars (BigInt/digits (BigInt/add a (BigInt/new "1"))))
 ; "1000000000000000000"
+```
+
+```que
+(SignedBigInt->String
+  (SignedBigInt/add (SignedBigInt/new "-25") (SignedBigInt/new "7")))
+; "-18"
+
+(StructBigDec->String
+  (StructBigDec/new-digits false (BigInt [3]) (BigInt [1 4])))
+; "3.14"
 ```
 
 `Date/iso->Vector`, `Date/iso-z->Vector`, `Date/year`, `Date/month`,

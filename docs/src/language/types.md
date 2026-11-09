@@ -33,6 +33,23 @@ missing one without a sentinel value:
 ; 20
 ```
 
+For operations that need to report *why* they failed, use the generic
+`(Result T E)` enum. `Result/ok` carries a successful `T`; `Result/err`
+carries an error value `E`:
+
+```que
+(let divide
+  (lambda (numerator denominator)
+    (if (= denominator 0)
+      (Result/err "division by zero")
+      (Result/ok (/ numerator denominator)))))
+
+(match (divide 12 3)
+  (Result/ok value) value
+  (Result/err message) 0)
+; 4
+```
+
 ```que
 (let count 3)              ; Int
 (let ready? true)          ; Bool

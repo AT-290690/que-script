@@ -177,26 +177,27 @@ q)))
           (alter! i (+ i 1))))
       matrix))))
 
+(sig BigInt/remove-leading-zeroes (BigInt -> BigInt))
 (let BigInt/remove-leading-zeroes
-  (lambda digits
+  (lambda value
     (do
+      (let digits (BigInt/digits value))
       (mut i 0)
       (while (and (< i (length digits))
                   (zero? (get i digits))) (do
         (++ i)))
       (if (= i (length digits))
-          [0]
-          (slice i (length digits) digits)))))
+          (BigInt [0])
+          (BigInt (slice i (length digits) digits))))))
 
 (let StructBigDec/rescale-signed (lambda signed from-precision to-precision
   (if (= from-precision to-precision)
       signed
-      (SignedBigInt/normalize {
+      (SignedBigInt/normalize (SignedBigInt
         (SignedBigInt/negative? signed)
         (BigInt/mul
           (SignedBigInt/digits signed)
-          (StructBigDec/scale (- to-precision from-precision)))
-      }))))
+          (StructBigDec/scale (- to-precision from-precision))))))))
 
 (let StructBigDec/align-left (lambda a b
   (do
@@ -495,16 +496,19 @@ q)))
       (alter! i (+ i 1))))
     (* num sign))))
 
+(sig BigInt/equal? (BigInt -> BigInt -> Bool))
 (let BigInt/equal? (lambda a b (do
-  (if (< (length a) (length b)) false
-  (if (> (length a) (length b)) false
+  (let a-digits (BigInt/digits a))
+  (let b-digits (BigInt/digits b))
+  (if (< (length a-digits) (length b-digits)) false
+  (if (> (length a-digits) (length b-digits)) false
     (do
       (mut i 0)
       (mut result true)
-      (let len (length a))
+      (let len (length a-digits))
       (while (< i len) (do
-        (let da (get i a))
-        (let db (get i b))
+        (let da (get i a-digits))
+        (let db (get i b-digits))
         (if (not (= da db)) (do
           (alter! result false)
           (alter! i len)))
@@ -777,536 +781,486 @@ q)))
     (alter! index (+ index 1))))
   out)))
 
-(let BigInt/range (lambda start end (do
-     (let out [ (BigInt/new (Integer->Chars start)) ])
-     (mut i (+ start 1))
-     (while (<= i end) (do
-        (set! (length out) (BigInt/new (Integer->Chars i)) out)
-        (alter! i (+ i 1))))
-   out)))
+(sig BigInt/new ([Char] -> BigInt))
+(let BigInt/new (lambda text
+  (BigInt/remove-leading-zeroes (BigInt (Chars->Digits text)))))
 
+(sig BigInt/zero BigInt)
+(let BigInt/zero (BigInt [0]))
+(sig BigInt/one BigInt)
+(let BigInt/one (BigInt [1]))
+
+(sig BigInt/range (Int -> Int -> [BigInt]))
+(let BigInt/range (lambda start end (do
+  (let out [(BigInt/new (Integer->Chars start))])
+  (mut i (+ start 1))
+  (while (<= i end) (do
+    (push! (BigInt/new (Integer->Chars i)) out)
+    (++ i)))
+  out)))
+
+(sig BigInt/add (BigInt -> BigInt -> BigInt))
 (let BigInt/add (lambda a1 b1 (do
-  (let a (reverse a1))
-  (let b (reverse b1))
+  (let a (reverse (BigInt/digits a1)))
+  (let b (reverse (BigInt/digits b1)))
   (let max-length (max (length a) (length b)))
   (let result [])
   (mut carry 0)
   (loop/range/exclusive i 0 max-length
-    (let digit-A (if (< i (length a)) (get i a) 0))
-    (let digit-B (if (< i (length b)) (get i b) 0))
-    (let sm (+ digit-A digit-B carry))
-    (push! (% sm 10) result)
-    (alter! carry (/ sm 10)))
-  ; Handle remaining carry
+    (let digit-a (if (< i (length a)) (get i a) 0))
+    (let digit-b (if (< i (length b)) (get i b) 0))
+    (let total (+ digit-a digit-b carry))
+    (push! (% total 10) result)
+    (alter! carry (/ total 10)))
   (while (> carry 0) (do
     (push! (% carry 10) result)
     (alter! carry (/ carry 10))))
-  (reverse result))))
+  (BigInt (reverse result)))))
 
-(let BigInt/sub
-  (lambda a1 b1
+(sig BigInt/sub (BigInt -> BigInt -> BigInt))
+(let BigInt/sub (lambda a1 b1
+  ; BigInt is unsigned.  Do not silently wrap a negative result modulo 10.
+  (if (BigInt/lt? a1 b1)
+    (do (/ 1 0) BigInt/zero)
     (do
-      (let a (reverse a1))
-      (let b (reverse b1))
-      (let result [])
-      (mut borrow 0)
-      (mut j 0)
-      (let max-length (max (length a) (length b)))
-
-      (while (< j max-length) (do
-        (let digit-a (if (< j (length a)) (get j a) 0))
-        (let digit-b (if (< j (length b)) (get j b) 0))
-        (let diff (- (- digit-a digit-b) borrow))
-
-        (if (< diff 0)
-            (do
-              (push! (+ diff 10) result)
-              (alter! borrow 1))
-            (do
-              (push! diff result)
-              (alter! borrow 0)))
-
-        (alter! j (+ j 1))))
-
-      (mut k (- (length result) 1))
-      (while (and (> k 0) (= (get k result) 0)) (do
-        (pop! result)
-        (alter! k (- k 1))))
-
-      (reverse result))))
-
-(let BigInt/mul (lambda a1 b1 (do
-  (let a (reverse a1))
-  (let b (reverse b1))
+  (let a (reverse (BigInt/digits a1)))
+  (let b (reverse (BigInt/digits b1)))
   (let result [])
-  ; Initialize result array with zeros
+  (mut borrow 0)
+  (mut i 0)
+  (let max-length (max (length a) (length b)))
+  (while (< i max-length) (do
+    (let digit-a (if (< i (length a)) (get i a) 0))
+    (let digit-b (if (< i (length b)) (get i b) 0))
+    (let difference (- (- digit-a digit-b) borrow))
+    (if (< difference 0)
+      (do (push! (+ difference 10) result) (alter! borrow 1))
+      (do (push! difference result) (alter! borrow 0)))
+    (++ i)))
+  (mut last (- (length result) 1))
+  (while (and (> last 0) (= (get last result) 0)) (do
+    (pop! result)
+    (alter! last (- last 1))))
+  (BigInt (reverse result))))))
+
+(sig BigInt/mul (BigInt -> BigInt -> BigInt))
+(let BigInt/mul (lambda a1 b1 (do
+  (let a (reverse (BigInt/digits a1)))
+  (let b (reverse (BigInt/digits b1)))
+  (let result [])
   (loop/range/exclusive _ 0 (+ (length a) (length b)) (push! 0 result))
   (loop/range/exclusive i 0 (length a)
     (mut carry 0)
     (let digit-a (get i a))
     (loop/range/exclusive j 0 (length b)
-      (let digit-B (get j b))
-      (let idx (+ i j))
-      (let prod (+ (* digit-a digit-B) (get idx result) carry))
-      (set! idx (% prod 10) result)
-      (alter! carry (/ prod 10)))
-    ; Handle carry for this digit-a
-    (mut k (+ i (length b)))
+      (let index (+ i j))
+      (let product (+ (* digit-a (get j b)) (get index result) carry))
+      (set! index (% product 10) result)
+      (alter! carry (/ product 10)))
+    (mut index (+ i (length b)))
     (while (> carry 0) (do
-      (if (not (< k (length result))) (push! 0 result))
-      (let sm (+ (get k result) carry))
-      (set! k (% sm 10) result)
-      (alter! carry (/ sm 10))
-      (alter! k (+ k 1)))))
-  ; Remove trailing zeros (from the most significant end), but keep at least one digit
-  (mut ii (- (length result) 1))
-  (while (and (> ii 0) (= (get ii result) 0) (> (length result) 1)) (do
+      (if (not (< index (length result))) (push! 0 result))
+      (let total (+ (get index result) carry))
+      (set! index (% total 10) result)
+      (alter! carry (/ total 10))
+      (++ index))))
+  (mut last (- (length result) 1))
+  (while (and (> last 0) (= (get last result) 0)) (do
     (pop! result)
-    (alter! ii (- ii 1))))
-  (reverse result))))
+    (alter! last (- last 1))))
+  (BigInt (reverse result)))))
 
+(sig BigInt/lte? (BigInt -> BigInt -> Bool))
 (let BigInt/lte? (lambda a b (do
-  (if (< (length a) (length b)) true
-  (if (> (length a) (length b)) false
-    ; Equal length, compare digit by digit
+  (let a-digits (BigInt/digits a))
+  (let b-digits (BigInt/digits b))
+  (if (< (length a-digits) (length b-digits)) true
+  (if (> (length a-digits) (length b-digits)) false
     (do
       (mut i 0)
-      (mut result true) ; assume a <= b
-      (while (< i (length a)) (do
-        (let da (get i a))
-        (let db (get i b))
-        (if (< da db) (do
-          (alter! result true)
-          (alter! i (length a))))
-        (if (> da db) (do
-          (alter! result false)
-          (alter! i (length a))))
-        (alter! i (+ i 1))))
+      (mut result true)
+      (while (< i (length a-digits)) (do
+        (let left (get i a-digits))
+        (let right (get i b-digits))
+        (if (< left right) (do (alter! result true) (alter! i (length a-digits))))
+        (if (> left right) (do (alter! result false) (alter! i (length a-digits))))
+        (++ i)))
       result))))))
 
-(let BigInt/gte? (lambda a b (do
-  (if (> (length a) (length b)) true
-  (if (< (length a) (length b)) false
-    ; Equal length, compare digit by digit
+(sig BigInt/gte? (BigInt -> BigInt -> Bool))
+(let BigInt/gte? (lambda a b (BigInt/lte? b a)))
+
+(sig BigInt/lt? (BigInt -> BigInt -> Bool))
+(let BigInt/lt? (lambda a b (and (BigInt/lte? a b) (not (BigInt/equal? a b)))))
+
+(sig BigInt/gt? (BigInt -> BigInt -> Bool))
+(let BigInt/gt? (lambda a b (BigInt/lt? b a)))
+
+(sig BigInt/div (BigInt -> BigInt -> BigInt))
+(let BigInt/div (lambda dividend divisor
+  ; Keep the partial arithmetic API aligned with Int division: zero divisors
+  ; trap instead of manufacturing a digit-wise quotient.
+  (if (BigInt/equal? divisor BigInt/zero)
+    (do (/ 1 0) BigInt/zero)
     (do
-      (mut i 0)
-      (mut result true) ; assume a >= b
-      (while (< i (length a)) (do
-        (let da (get i a))
-        (let db (get i b))
-        (if (> da db) (do
-          (alter! result true)
-          (alter! i (length a))))
-        (if (< da db) (do
-          (alter! result false)
-          (alter! i (length a))))
-        (alter! i (+ i 1))))
-      result))))))
+  (let result [])
+  (&mut current BigInt/zero)
+  (let digits (BigInt/digits dividend))
+  (mut i 0)
+  (while (< i (length digits)) (do
+    (let digit (get i digits))
+    (let cur0 (&get current))
+    (let cur1 (BigInt (cons (BigInt/digits cur0) [digit])))
+    (&alter! current (BigInt/remove-leading-zeroes cur1))
+    (mut low 0)
+    (mut high 9)
+    (mut quotient-digit 0)
+    (while (<= low high) (do
+      (let mid (/ (+ low high) 2))
+      (if (BigInt/lte? (BigInt/mul divisor (BigInt [mid])) (&get current))
+        (do (alter! quotient-digit mid) (alter! low (+ mid 1)))
+        (alter! high (- mid 1)))))
+    (push! quotient-digit result)
+    (&alter! current (BigInt/sub (&get current)
+                                  (BigInt/mul divisor (BigInt [quotient-digit]))))
+    (++ i)))
+  (BigInt/remove-leading-zeroes (BigInt result))))))
 
-(let BigInt/lt? (lambda a b (do
-  (if (< (length a) (length b)) true
-  (if (> (length a) (length b)) false
-    ; Equal length, check for strict less (not equal)
-    (do
-      (mut i 0)
-      (mut found-less false) ; true if a < b at some digit
-      (while (< i (length a)) (do
-        (let da (get i a))
-        (let db (get i b))
-        (if (< da db) (do
-          (alter! found-less true)
-          (alter! i (length a))))
-        (if (> da db) (do
-          (alter! i (length a)))) ; stop on a > b, keep found-less false
-        (alter! i (+ i 1))))
-      found-less))))))
+(sig BigInt/mod (BigInt -> BigInt -> BigInt))
+(let BigInt/mod (lambda a b
+  (BigInt/sub a (BigInt/mul b (BigInt/div a b)))))
 
-(let BigInt/gt? (lambda a b (do
-  (if (> (length a) (length b)) true
-  (if (< (length a) (length b)) false
-    ; Equal length, check for strict greater (not equal)
-    (do
-      (mut i 0)
-      (mut found-greater false) ; true if a > b at some digit
-      (while (< i (length a)) (do
-        (let da (get i a))
-        (let db (get i b))
-        (if (> da db) (do
-          (alter! found-greater true)
-          (alter! i (length a))))
-        (if (< da db) (do
-          (alter! i (length a)))) ; stop on a < b, keep found-greater false
-        (alter! i (+ i 1))))
-      found-greater))))))
-
-
-(let BigInt/div
-  (lambda dividend divisor
-    (do
-      (let result [])
-      (&mut current [])
-      (let len (length dividend))
-      (mut i 0)
-
-      (while (< i len) (do
-        (let digit (get i dividend))
-
-        ;; current = trim(cons(current, [digit]))
-        (let cur0 (&get current))
-        (let cur1 (cons cur0 [digit]))
-        (let cur2 (BigInt/remove-leading-zeroes cur1))
-        (&alter! current cur2)
-
-        ;; binary search q in [0,9]
-        (mut low 0)
-        (mut high 9)
-        (mut q 0)
-
-        (while (<= low high) (do
-          (let mid (/ (+ low high) 2))
-          (let prod (BigInt/mul divisor [mid]))
-          (let cur (&get current))
-
-          (if (BigInt/lte? prod cur)
-              (do
-                (alter! q mid)
-                (alter! low (+ mid 1)))
-              (alter! high (- mid 1)))))
-
-        (push! q result)
-
-        ;; current = current - divisor*q
-        (let prod2 (BigInt/mul divisor [q]))
-        (let cur3 (&get current))
-        (let cur4 (BigInt/sub cur3 prod2))
-        (&alter! current cur4)
-
-        (alter! i (+ i 1))))
-
-      (let out (BigInt/remove-leading-zeroes result))
-      (if (empty? out) [0] out))))
-
-(let BigInt/mod
-  (lambda a b
-    (do
-      (let q (BigInt/div a b))
-      (let p (BigInt/mul b q))
-      (let r (BigInt/sub a p))
-      r)))
-
+(sig BigInt/square (BigInt -> BigInt))
 (let BigInt/square (lambda x (BigInt/mul x x)))
 
+(sig BigInt/div/floor (BigInt -> BigInt -> BigInt))
 (let BigInt/div/floor (lambda a b (BigInt/div a b)))
 
-(let BigInt/div/ceal (lambda a b (BigInt/div
-    (BigInt/sub (BigInt/add a b) [ 1 ]) b)))
+(sig BigInt/div/ceal (BigInt -> BigInt -> BigInt))
+(let BigInt/div/ceal (lambda a b
+  (BigInt/div (BigInt/sub (BigInt/add a b) BigInt/one) b)))
 
+(sig BigInt/sum ([BigInt] -> BigInt))
 (let BigInt/sum (lambda xs (do
-    (&mut total [ 0 ])
-    (let len (length xs))
-    (mut i 0)
-    (while (< i len) (do
-      (&alter! total (BigInt/add (&get total) (get i xs)))
-      (alter! i (+ i 1))))
-    (&get total))))
+  (&mut total BigInt/zero)
+  (loop i (< i (length xs))
+    (&alter! total (BigInt/add (&get total) (get i xs))))
+  (&get total))))
 
+(sig BigInt/product ([BigInt] -> BigInt))
 (let BigInt/product (lambda xs (do
-    (&mut total [ 1 ])
-    (let len (length xs))
-    (mut i 0)
-    (while (< i len) (do
-      (&alter! total (BigInt/mul (&get total) (get i xs)))
-      (alter! i (+ i 1))))
-    (&get total))))
+  (&mut total BigInt/one)
+  (loop i (< i (length xs))
+    (&alter! total (BigInt/mul (&get total) (get i xs))))
+  (&get total))))
 
-(let BigInt/new (lambda str (Chars->Digits str)))
-
-(let BigInt/pow (lambda a b (if (= b 0) [ 1 ] (do
+(sig BigInt/pow (BigInt -> Int -> BigInt))
+(let BigInt/pow (lambda a exponent
+  (if (= exponent 0) BigInt/one (do
     (&mut out a)
-    (mut i 0)
-    (while (< i (- b 1)) (do (&alter! out (BigInt/mul (&get out) a)) (alter! i (+ i 1))))
+    (loop i (< i (- exponent 1))
+      (&alter! out (BigInt/mul (&get out) a)))
     (&get out)))))
 
-(let BigInt/expt (lambda a b (if (and (= (length b) 1) (= (get 0 b) 0)) [ 1 ] (do
+(sig BigInt/expt (BigInt -> BigInt -> BigInt))
+(let BigInt/expt (lambda a exponent
+  (if (BigInt/equal? exponent BigInt/zero) BigInt/one (do
     (&mut out a)
-    (&mut exp (BigInt/sub b [ 1 ]))
-    (while (not (and (= (length (&get exp)) 1) (= (get 0 (&get exp)) 0))) (do
+    (&mut remaining (BigInt/sub exponent BigInt/one))
+    (while (not (BigInt/equal? (&get remaining) BigInt/zero)) (do
       (&alter! out (BigInt/mul (&get out) a))
-      (&alter! exp (BigInt/sub (&get exp) [ 1 ]))))
+      (&alter! remaining (BigInt/sub (&get remaining) BigInt/one))))
     (&get out)))))
 
-(let SignedBigInt/zero { false [0] })
+; Symbolic aliases keep arithmetic readable without losing the named API.
+(sig BigInt/+ (BigInt -> BigInt -> BigInt))
+(let BigInt/+ BigInt/add)
+(sig BigInt/- (BigInt -> BigInt -> BigInt))
+(let BigInt/- BigInt/sub)
+(sig BigInt/* (BigInt -> BigInt -> BigInt))
+(let BigInt/* BigInt/mul)
+(sig BigInt// (BigInt -> BigInt -> BigInt))
+(let BigInt// BigInt/div)
 
-(let SignedBigInt/one { false [1] })
+(sig SignedBigInt/zero SignedBigInt)
+(let SignedBigInt/zero (SignedBigInt false BigInt/zero))
+(sig SignedBigInt/one SignedBigInt)
+(let SignedBigInt/one (SignedBigInt false BigInt/one))
 
-(let SignedBigInt/negative? (lambda n (if (fst n) true false)))
+(sig SignedBigInt/abs (SignedBigInt -> BigInt))
+(let SignedBigInt/abs SignedBigInt/digits)
 
-(let SignedBigInt/digits snd)
+(sig SignedBigInt/zero? (SignedBigInt -> Bool))
+(let SignedBigInt/zero? (lambda value
+  (BigInt/equal? (SignedBigInt/digits value) BigInt/zero)))
 
-(let SignedBigInt/abs snd)
+(sig SignedBigInt/normalize (SignedBigInt -> SignedBigInt))
+(let SignedBigInt/normalize (lambda value (do
+  (let magnitude (BigInt/remove-leading-zeroes (SignedBigInt/digits value)))
+  (if (BigInt/equal? magnitude BigInt/zero)
+    SignedBigInt/zero
+    (SignedBigInt (SignedBigInt/negative? value) magnitude)))))
 
-(let SignedBigInt/zero? (lambda n (BigInt/equal? (snd n) [0])))
+(sig SignedBigInt/new ([Char] -> SignedBigInt))
+(let SignedBigInt/new (lambda text
+  (if (and (> (length text) 0) (=# (get 0 text) '-'))
+    (SignedBigInt/normalize (SignedBigInt true (BigInt/new (slice 1 (length text) text))))
+    (SignedBigInt/normalize (SignedBigInt false (BigInt/new text))))))
 
-(let SignedBigInt/normalize (lambda { neg digits } (do
-  (let mag (BigInt/remove-leading-zeroes digits))
-  (if (or (empty? mag) (BigInt/equal? mag [0]))
-      SignedBigInt/zero
-      { neg mag }))))
+(sig SignedBigInt/negate (SignedBigInt -> SignedBigInt))
+(let SignedBigInt/negate (lambda value
+  (if (SignedBigInt/zero? value)
+    SignedBigInt/zero
+    (SignedBigInt (not (SignedBigInt/negative? value)) (SignedBigInt/digits value)))))
 
-(let SignedBigInt/new (lambda str
-  (if (and (> (length str) 0) (=# (get 0 str) '-'))
-      (SignedBigInt/normalize { true (BigInt/new (slice 1 (length str) str)) })
-      (SignedBigInt/normalize { false (BigInt/new str) }))))
-
-(let SignedBigInt/negate (lambda { neg digits }
-  (if (BigInt/equal? digits [0])
-      SignedBigInt/zero
-      { (not neg) digits })))
-
+(sig SignedBigInt/equal? (SignedBigInt -> SignedBigInt -> Bool))
 (let SignedBigInt/equal? (lambda a b
-  (and (=? (fst a) (fst b)) (BigInt/equal? (snd a) (snd b)))))
+  (and (=? (SignedBigInt/negative? a) (SignedBigInt/negative? b))
+       (BigInt/equal? (SignedBigInt/digits a) (SignedBigInt/digits b)))))
 
+(sig SignedBigInt/lt? (SignedBigInt -> SignedBigInt -> Bool))
 (let SignedBigInt/lt? (lambda a b
-  (if (fst a)
-      (if (fst b)
-          (BigInt/gt? (snd a) (snd b))
-          true)
-      (if (fst b)
-          false
-          (BigInt/lt? (snd a) (snd b))))))
+  (if (SignedBigInt/negative? a)
+    (if (SignedBigInt/negative? b)
+      (BigInt/gt? (SignedBigInt/digits a) (SignedBigInt/digits b))
+      true)
+    (if (SignedBigInt/negative? b)
+      false
+      (BigInt/lt? (SignedBigInt/digits a) (SignedBigInt/digits b))))))
 
+(sig SignedBigInt/lte? (SignedBigInt -> SignedBigInt -> Bool))
 (let SignedBigInt/lte? (lambda a b
   (or (SignedBigInt/equal? a b) (SignedBigInt/lt? a b))))
 
-(let SignedBigInt/gt? (lambda a b
-  (not (SignedBigInt/lte? a b))))
+(sig SignedBigInt/gt? (SignedBigInt -> SignedBigInt -> Bool))
+(let SignedBigInt/gt? (lambda a b (not (SignedBigInt/lte? a b))))
 
-(let SignedBigInt/gte? (lambda a b
-  (not (SignedBigInt/lt? a b))))
+(sig SignedBigInt/gte? (SignedBigInt -> SignedBigInt -> Bool))
+(let SignedBigInt/gte? (lambda a b (not (SignedBigInt/lt? a b))))
 
+(sig SignedBigInt/add (SignedBigInt -> SignedBigInt -> SignedBigInt))
 (let SignedBigInt/add (lambda a b
-  (if (=? (fst a) (fst b))
-      (SignedBigInt/normalize { (fst a) (BigInt/add (snd a) (snd b)) })
-      (if (BigInt/gt? (snd a) (snd b))
-          (SignedBigInt/normalize { (fst a) (BigInt/sub (snd a) (snd b)) })
-          (if (BigInt/lt? (snd a) (snd b))
-              (SignedBigInt/normalize { (fst b) (BigInt/sub (snd b) (snd a)) })
-              SignedBigInt/zero)))))
+  (if (=? (SignedBigInt/negative? a) (SignedBigInt/negative? b))
+    (SignedBigInt/normalize (SignedBigInt (SignedBigInt/negative? a)
+                                           (BigInt/add (SignedBigInt/digits a) (SignedBigInt/digits b))))
+    (if (BigInt/gt? (SignedBigInt/digits a) (SignedBigInt/digits b))
+      (SignedBigInt/normalize (SignedBigInt (SignedBigInt/negative? a)
+                                             (BigInt/sub (SignedBigInt/digits a) (SignedBigInt/digits b))))
+      (if (BigInt/lt? (SignedBigInt/digits a) (SignedBigInt/digits b))
+        (SignedBigInt/normalize (SignedBigInt (SignedBigInt/negative? b)
+                                               (BigInt/sub (SignedBigInt/digits b) (SignedBigInt/digits a))))
+        SignedBigInt/zero)))))
 
-(let SignedBigInt/sub (lambda a b
-  (SignedBigInt/add a (SignedBigInt/negate b))))
+(sig SignedBigInt/sub (SignedBigInt -> SignedBigInt -> SignedBigInt))
+(let SignedBigInt/sub (lambda a b (SignedBigInt/add a (SignedBigInt/negate b))))
 
+(sig SignedBigInt/mul (SignedBigInt -> SignedBigInt -> SignedBigInt))
 (let SignedBigInt/mul (lambda a b
-  (SignedBigInt/normalize { (not (=? (fst a) (fst b))) (BigInt/mul (snd a) (snd b)) })))
+  (SignedBigInt/normalize (SignedBigInt
+    (not (=? (SignedBigInt/negative? a) (SignedBigInt/negative? b)))
+    (BigInt/mul (SignedBigInt/digits a) (SignedBigInt/digits b))))))
 
+(sig SignedBigInt/square (SignedBigInt -> SignedBigInt))
 (let SignedBigInt/square (lambda x (SignedBigInt/mul x x)))
 
-(let SignedBigInt/pow (lambda a b
-  (if (= b 0)
-      SignedBigInt/one
-      (SignedBigInt/normalize {
-        (and (fst a) (= (% b 2) 1))
-        (BigInt/pow (snd a) b)
-      }))))
+(sig SignedBigInt/pow (SignedBigInt -> Int -> SignedBigInt))
+(let SignedBigInt/pow (lambda a exponent
+  (if (= exponent 0)
+    SignedBigInt/one
+    (SignedBigInt/normalize (SignedBigInt
+      (and (SignedBigInt/negative? a) (= (% exponent 2) 1))
+      (BigInt/pow (SignedBigInt/digits a) exponent))))))
 
-(let SignedBigInt/expt (lambda a b
-  (if (BigInt/equal? b [0])
-      SignedBigInt/one
-      (SignedBigInt/normalize {
-        (and (fst a) (BigInt/equal? (BigInt/mod b [2]) [1]))
-        (BigInt/expt (snd a) b)
-      }))))
+(sig SignedBigInt/expt (SignedBigInt -> BigInt -> SignedBigInt))
+(let SignedBigInt/expt (lambda a exponent
+  (if (BigInt/equal? exponent BigInt/zero)
+    SignedBigInt/one
+    (SignedBigInt/normalize (SignedBigInt
+      (and (SignedBigInt/negative? a) (BigInt/equal? (BigInt/mod exponent (BigInt [2])) BigInt/one))
+      (BigInt/expt (SignedBigInt/digits a) exponent))))))
 
-(let SignedBigInt/div (lambda a b (do
-  (let q (BigInt/div (snd a) (snd b)))
-  (SignedBigInt/normalize { (not (=? (fst a) (fst b))) q }))))
+(sig SignedBigInt/div (SignedBigInt -> SignedBigInt -> SignedBigInt))
+(let SignedBigInt/div (lambda a b
+  (SignedBigInt/normalize (SignedBigInt
+    (not (=? (SignedBigInt/negative? a) (SignedBigInt/negative? b)))
+    (BigInt/div (SignedBigInt/digits a) (SignedBigInt/digits b))))))
 
+(sig SignedBigInt/mod (SignedBigInt -> SignedBigInt -> SignedBigInt))
 (let SignedBigInt/mod (lambda a b
   (SignedBigInt/sub a (SignedBigInt/mul b (SignedBigInt/div a b)))))
 
+(sig SignedBigInt/div/floor (SignedBigInt -> SignedBigInt -> SignedBigInt))
 (let SignedBigInt/div/floor (lambda a b (do
-  (let q (SignedBigInt/div a b))
-  (let r (SignedBigInt/mod a b))
-  (if (and (not (SignedBigInt/zero? r)) (not (=? (fst a) (fst b))))
-      (SignedBigInt/sub q SignedBigInt/one)
-      q))))
+  (let quotient (SignedBigInt/div a b))
+  (let remainder (SignedBigInt/mod a b))
+  (if (and (not (SignedBigInt/zero? remainder))
+           (not (=? (SignedBigInt/negative? a) (SignedBigInt/negative? b))))
+    (SignedBigInt/sub quotient SignedBigInt/one)
+    quotient))))
 
+(sig SignedBigInt/div/ceil (SignedBigInt -> SignedBigInt -> SignedBigInt))
 (let SignedBigInt/div/ceil (lambda a b (do
-  (let q (SignedBigInt/div a b))
-  (let r (SignedBigInt/mod a b))
-  (if (and (not (SignedBigInt/zero? r)) (=? (fst a) (fst b)))
-      (SignedBigInt/add q SignedBigInt/one)
-      q))))
+  (let quotient (SignedBigInt/div a b))
+  (let remainder (SignedBigInt/mod a b))
+  (if (and (not (SignedBigInt/zero? remainder))
+           (=? (SignedBigInt/negative? a) (SignedBigInt/negative? b)))
+    (SignedBigInt/add quotient SignedBigInt/one)
+    quotient))))
 
-(let SignedBigInt->String (lambda n
-  (if (fst n)
-      (cons "-" (Digits->Chars (snd n)))
-      (Digits->Chars (snd n)))))
+(sig SignedBigInt->String (SignedBigInt -> [Char]))
+(let SignedBigInt->String (lambda value
+  (if (SignedBigInt/negative? value)
+    (cons "-" (Digits->Chars (BigInt/digits (SignedBigInt/digits value))))
+    (Digits->Chars (BigInt/digits (SignedBigInt/digits value))))))
 
+(sig SignedBigInt/range (SignedBigInt -> SignedBigInt -> [SignedBigInt]))
 (let SignedBigInt/range (lambda start end
-  (if (SignedBigInt/gt? start end)
-      []
-      (do
-        (let out [start])
-        (&mut current start)
-        (while (SignedBigInt/lt? (&get current) end) (do
-          (&alter! current (SignedBigInt/add (&get current) SignedBigInt/one))
-          (set! (length out) (&get current) out)))
-        out))))
+  (if (SignedBigInt/gt? start end) [] (do
+    (let out [start])
+    (&mut current start)
+    (while (SignedBigInt/lt? (&get current) end) (do
+      (&alter! current (SignedBigInt/add (&get current) SignedBigInt/one))
+      (push! (&get current) out)))
+    out))))
 
+(sig SignedBigInt/sum ([SignedBigInt] -> SignedBigInt))
 (let SignedBigInt/sum (lambda xs (do
-    (&mut total SignedBigInt/zero)
-    (let len (length xs))
-    (mut i 0)
-    (while (< i len) (do
-      (&alter! total (SignedBigInt/add (&get total) (get i xs)))
-      (alter! i (+ i 1))))
-    (&get total))))
+  (&mut total SignedBigInt/zero)
+  (loop i (< i (length xs))
+    (&alter! total (SignedBigInt/add (&get total) (get i xs))))
+  (&get total))))
 
+(sig SignedBigInt/product ([SignedBigInt] -> SignedBigInt))
 (let SignedBigInt/product (lambda xs (do
-    (&mut total SignedBigInt/one)
-    (let len (length xs))
-    (mut i 0)
-    (while (< i len) (do
-      (&alter! total (SignedBigInt/mul (&get total) (get i xs)))
-      (alter! i (+ i 1))))
-    (&get total))))
+  (&mut total SignedBigInt/one)
+  (loop i (< i (length xs))
+    (&alter! total (SignedBigInt/mul (&get total) (get i xs))))
+  (&get total))))
 
-(let StructBigDec/zero { 0 SignedBigInt/zero })
+(sig StructBigDec/zero StructBigDec)
+(let StructBigDec/zero (StructBigDec 0 SignedBigInt/zero))
+(sig StructBigDec/one StructBigDec)
+(let StructBigDec/one (StructBigDec 0 SignedBigInt/one))
 
-(let StructBigDec/one { 0 SignedBigInt/one })
+(sig StructBigDec/negative? (StructBigDec -> Bool))
+(let StructBigDec/negative? (lambda value
+  (SignedBigInt/negative? (StructBigDec/signed value))))
 
-(let StructBigDec/precision fst)
+(sig StructBigDec/scale (Int -> BigInt))
+(let StructBigDec/scale (lambda precision (BigInt/pow (BigInt [1 0]) precision)))
 
-(let StructBigDec/signed snd)
-
-(let StructBigDec/negative? (lambda n (SignedBigInt/negative? (StructBigDec/signed n))))
-
-(let StructBigDec/scale (lambda precision (BigInt/pow [1 0] precision)))
-
+(sig StructBigDec/from-scaled (Int -> SignedBigInt -> StructBigDec))
 (let StructBigDec/from-scaled (lambda precision scaled
-  { precision (SignedBigInt/normalize scaled) }))
+  (StructBigDec precision (SignedBigInt/normalize scaled))))
 
-(let StructBigDec/new (lambda precision neg whole fraction
-  (do
-    (let scale (StructBigDec/scale precision))
-    (let whole-scaled (BigInt/mul whole scale))
-    (let mag (BigInt/add whole-scaled fraction))
-    (StructBigDec/from-scaled precision { neg mag }))))
+(sig StructBigDec/new (Int -> Bool -> BigInt -> BigInt -> StructBigDec))
+(let StructBigDec/new (lambda precision negative whole fraction (do
+  (let scale (StructBigDec/scale precision))
+  (let scaled-whole (BigInt/mul whole scale))
+  (StructBigDec/from-scaled precision
+    (SignedBigInt negative (BigInt/add scaled-whole fraction))))))
 
-(let StructBigDec/new-digits (lambda neg whole fraction
-  (StructBigDec/new (length fraction) neg whole fraction)))
+(sig StructBigDec/new-digits (Bool -> BigInt -> BigInt -> StructBigDec))
+(let StructBigDec/new-digits (lambda negative whole fraction
+  (StructBigDec/new (length (BigInt/digits fraction)) negative whole fraction)))
 
-(let StructBigDec/pi (StructBigDec/new-digits false [3] [1 4 1 5 9 2 6 5 3 5 8 9 7 9 3]))
+(sig StructBigDec/pi StructBigDec)
+(let StructBigDec/pi (StructBigDec/new-digits false (BigInt [3]) (BigInt [1 4 1 5 9 2 6 5 3 5 8 9 7 9 3])))
+(sig StructBigDec/e StructBigDec)
+(let StructBigDec/e (StructBigDec/new-digits false (BigInt [2]) (BigInt [7 1 8 2 8 1 8 2 8 4 5 9 0 4 5])))
 
-(let StructBigDec/e (StructBigDec/new-digits false [2] [7 1 8 2 8 1 8 2 8 4 5 9 0 4 5]))
+(sig StructBigDec/from-int (Int -> StructBigDec))
+(let StructBigDec/from-int (lambda value
+  (StructBigDec 0 (SignedBigInt/new (Integer->Chars value)))))
 
-(let StructBigDec/from-int (lambda n
-  { 0 (SignedBigInt/new (Integer->Chars n)) }))
+(sig StructBigDec/from-digits (Int -> Bool -> BigInt -> StructBigDec))
+(let StructBigDec/from-digits (lambda precision negative digits
+  (StructBigDec/from-scaled precision (SignedBigInt negative digits))))
 
-(let StructBigDec/from-digits (lambda precision neg scaled-digits
-  (StructBigDec/from-scaled precision { neg scaled-digits })))
+(sig StructBigDec/scaled (StructBigDec -> SignedBigInt))
+(let StructBigDec/scaled StructBigDec/signed)
 
-(let StructBigDec/scaled (lambda n (StructBigDec/signed n)))
+(sig StructBigDec/whole (StructBigDec -> BigInt))
+(let StructBigDec/whole (lambda value
+  (BigInt/div (SignedBigInt/digits (StructBigDec/signed value))
+              (StructBigDec/scale (StructBigDec/precision value)))))
 
-(let StructBigDec/whole (lambda n
-  (BigInt/div
-    (SignedBigInt/digits (StructBigDec/signed n))
-    (StructBigDec/scale (StructBigDec/precision n)))))
+(sig StructBigDec/fraction (StructBigDec -> BigInt))
+(let StructBigDec/fraction (lambda value
+  (BigInt/mod (SignedBigInt/digits (StructBigDec/signed value))
+              (StructBigDec/scale (StructBigDec/precision value)))))
 
-(let StructBigDec/fraction (lambda n
-  (BigInt/mod
-    (SignedBigInt/digits (StructBigDec/signed n))
-    (StructBigDec/scale (StructBigDec/precision n)))))
+(sig StructBigDec/add (StructBigDec -> StructBigDec -> StructBigDec))
+(let StructBigDec/add (lambda a b (do
+  (let precision (max (StructBigDec/precision a) (StructBigDec/precision b)))
+  (StructBigDec/from-scaled precision
+    (SignedBigInt/add (StructBigDec/align-left a b) (StructBigDec/align-right a b))))))
 
-(let StructBigDec/add (lambda a b
-  (do
-    (let precision (max (StructBigDec/precision a) (StructBigDec/precision b)))
-    (StructBigDec/from-scaled
-      precision
-      (SignedBigInt/add
-        (StructBigDec/align-left a b)
-        (StructBigDec/align-right a b))))))
+(sig StructBigDec/sub (StructBigDec -> StructBigDec -> StructBigDec))
+(let StructBigDec/sub (lambda a b (do
+  (let precision (max (StructBigDec/precision a) (StructBigDec/precision b)))
+  (StructBigDec/from-scaled precision
+    (SignedBigInt/sub (StructBigDec/align-left a b) (StructBigDec/align-right a b))))))
 
-(let StructBigDec/sub (lambda a b
-  (do
-    (let precision (max (StructBigDec/precision a) (StructBigDec/precision b)))
-    (StructBigDec/from-scaled
-      precision
-      (SignedBigInt/sub
-        (StructBigDec/align-left a b)
-        (StructBigDec/align-right a b))))))
-
+(sig StructBigDec/mul (StructBigDec -> StructBigDec -> StructBigDec))
 (let StructBigDec/mul (lambda a b
   (StructBigDec/from-scaled
     (+ (StructBigDec/precision a) (StructBigDec/precision b))
     (SignedBigInt/mul (StructBigDec/signed a) (StructBigDec/signed b)))))
 
-(let StructBigDec/div/precision (lambda precision a b
-  (do
-    (let numerator
-      (SignedBigInt/mul
-        (StructBigDec/signed a)
-        { false (StructBigDec/scale (+ precision (StructBigDec/precision b))) }))
-    (let denominator
-      { false
-        (BigInt/mul
-          (SignedBigInt/digits (StructBigDec/signed b))
-          (StructBigDec/scale (StructBigDec/precision a))) })
-    (StructBigDec/from-scaled precision (SignedBigInt/div numerator denominator)))))
+(sig StructBigDec/div/precision (Int -> StructBigDec -> StructBigDec -> StructBigDec))
+(let StructBigDec/div/precision (lambda precision a b (do
+  (let numerator (SignedBigInt/mul
+    (StructBigDec/signed a)
+    (SignedBigInt false (StructBigDec/scale (+ precision (StructBigDec/precision b))))))
+  ; Multiplying the signed divisor by a positive scale preserves its sign.
+  (let denominator (SignedBigInt/mul
+    (StructBigDec/signed b)
+    (SignedBigInt false (StructBigDec/scale (StructBigDec/precision a)))))
+  (StructBigDec/from-scaled precision (SignedBigInt/div numerator denominator)))))
 
+(sig StructBigDec/div (StructBigDec -> StructBigDec -> StructBigDec))
 (let StructBigDec/div (lambda a b
-  (StructBigDec/div/precision
-    (max (StructBigDec/precision a) (StructBigDec/precision b))
-    a
-    b)))
+  (StructBigDec/div/precision (max (StructBigDec/precision a) (StructBigDec/precision b)) a b)))
 
+(sig StructBigDec/equal? (StructBigDec -> StructBigDec -> Bool))
 (let StructBigDec/equal? (lambda a b
-  (SignedBigInt/equal?
-    (StructBigDec/align-left a b)
-    (StructBigDec/align-right a b))))
+  (SignedBigInt/equal? (StructBigDec/align-left a b) (StructBigDec/align-right a b))))
 
+(sig StructBigDec/lt? (StructBigDec -> StructBigDec -> Bool))
 (let StructBigDec/lt? (lambda a b
-  (SignedBigInt/lt?
-    (StructBigDec/align-left a b)
-    (StructBigDec/align-right a b))))
+  (SignedBigInt/lt? (StructBigDec/align-left a b) (StructBigDec/align-right a b))))
 
+(sig StructBigDec/lte? (StructBigDec -> StructBigDec -> Bool))
 (let StructBigDec/lte? (lambda a b
-  (SignedBigInt/lte?
-    (StructBigDec/align-left a b)
-    (StructBigDec/align-right a b))))
+  (SignedBigInt/lte? (StructBigDec/align-left a b) (StructBigDec/align-right a b))))
 
+(sig StructBigDec/gt? (StructBigDec -> StructBigDec -> Bool))
 (let StructBigDec/gt? (lambda a b
-  (SignedBigInt/gt?
-    (StructBigDec/align-left a b)
-    (StructBigDec/align-right a b))))
+  (SignedBigInt/gt? (StructBigDec/align-left a b) (StructBigDec/align-right a b))))
 
+(sig StructBigDec/gte? (StructBigDec -> StructBigDec -> Bool))
 (let StructBigDec/gte? (lambda a b
-  (SignedBigInt/gte?
-    (StructBigDec/align-left a b)
-    (StructBigDec/align-right a b))))
+  (SignedBigInt/gte? (StructBigDec/align-left a b) (StructBigDec/align-right a b))))
 
-(let StructBigDec/negate (lambda n
-  (StructBigDec/from-scaled
-    (StructBigDec/precision n)
-    (SignedBigInt/negate (StructBigDec/signed n)))))
+(sig StructBigDec/negate (StructBigDec -> StructBigDec))
+(let StructBigDec/negate (lambda value
+  (StructBigDec/from-scaled (StructBigDec/precision value)
+    (SignedBigInt/negate (StructBigDec/signed value)))))
 
-(let StructBigDec/abs (lambda n
-  (StructBigDec/from-scaled
-    (StructBigDec/precision n)
-    { false (SignedBigInt/digits (StructBigDec/signed n)) })))
+(sig StructBigDec/abs (StructBigDec -> StructBigDec))
+(let StructBigDec/abs (lambda value
+  (StructBigDec/from-scaled (StructBigDec/precision value)
+    (SignedBigInt false (SignedBigInt/digits (StructBigDec/signed value))))))
 
-(let StructBigDec->String (lambda n
-  (do
-    (let precision (StructBigDec/precision n))
-    (let whole (Digits->Chars (StructBigDec/whole n)))
-    (let fraction (String/prepend-zeroes
-      (Digits->Chars (StructBigDec/fraction n))
-      precision))
-    (let sign (if (StructBigDec/negative? n) "-" ""))
-    (if (= precision 0)
-        (cons sign whole)
-        (cons sign whole "." fraction)))))
+(sig StructBigDec->String (StructBigDec -> [Char]))
+(let StructBigDec->String (lambda value (do
+  (let precision (StructBigDec/precision value))
+  (let whole (Digits->Chars (BigInt/digits (StructBigDec/whole value))))
+  (let fraction (String/prepend-zeroes
+    (Digits->Chars (BigInt/digits (StructBigDec/fraction value))) precision))
+  (let sign (if (StructBigDec/negative? value) "-" ""))
+  (if (= precision 0) (cons sign whole) (cons sign whole "." fraction)))))
 
 (let Integer->Digits (lambda num (Integer->Digits-base num 10)))
 

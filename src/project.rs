@@ -174,7 +174,14 @@ pub fn parse_bundle_definitions(source: &str, label: &str) -> Result<Vec<Express
                 item.to_lisp()
             ));
         };
-        if kw != "let" && kw != "letrec" && kw != "mut" && kw != "extern" && kw != "sig" {
+        if kw != "let"
+            && kw != "letrec"
+            && kw != "mut"
+            && kw != "extern"
+            && kw != "sig"
+            && kw != "enum"
+            && kw != "record"
+        {
             return Err(format!(
                 "bundle '{}' must contain only top-level definitions; found '{}' at form {}",
                 label, kw, idx
@@ -441,6 +448,28 @@ mod tests {
         let defs = load_bundle_definitions(&base, &["./utils/util.que".to_string()])
             .expect("bundle defs should load");
         assert_eq!(defs.len(), 1);
+    }
+
+    #[test]
+    fn load_bundle_definitions_accepts_nominal_types_and_signatures() {
+        let base = std::env::temp_dir().join(format!(
+            "que-project-types-bundle-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock should be after epoch")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&base).expect("temp dir should exist");
+        fs::write(
+            base.join("types.que"),
+            "(record Point x Int y Int)\n(enum Reply T (Reply/ok value T))\n(sig origin Point)\n(let origin (Point 0 0))",
+        )
+        .expect("bundle should be written");
+
+        let defs = load_bundle_definitions(&base, &["./types.que".to_string()])
+            .expect("nominal bundle definitions should load");
+        assert_eq!(defs.len(), 4);
     }
 
     #[test]

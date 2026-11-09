@@ -18,6 +18,73 @@ fn collect_pattern_words(expr: &Expression, acc: &mut HashSet<String>) {
     }
 }
 
+/// Collect the names introduced by a surface `let` destructuring pattern.
+///
+/// The record name and record field labels are syntax, not bindings.  Keeping
+/// that distinction matters to the library tree shaker: in
+/// `(let (SignedBigInt negative? digits) value)`, `negative?` must shadow the
+/// standard predicate instead of accidentally retaining that predicate as a
+/// free reference.
+fn collect_let_pattern_bindings(pattern: &Expression, out: &mut HashSet<String>) {
+    match pattern {
+        Expression::Word(name) => {
+            if !matches!(name.as_str(), "_" | ".") {
+                out.insert(name.clone());
+            }
+        }
+        Expression::Apply(items) => {
+            let Some(Expression::Word(head)) = items.first() else {
+                return;
+            };
+            match head.as_str() {
+                "tuple" | "vector" => {
+                    for item in &items[1..] {
+                        collect_let_pattern_bindings(item, out);
+                    }
+                }
+                // A non-tuple/vector application is a nominal-record
+                // pattern. Its first item is the record name. Every later
+                // bare word is a field binding; `(field binding)` aliases or
+                // recursively destructures that field.
+                _ => {
+                    for item in &items[1..] {
+                        match item {
+                            Expression::Word(name) => {
+                                if !matches!(name.as_str(), "_" | ".") {
+                                    out.insert(name.clone());
+                                }
+                            }
+                            Expression::Apply(parts) if parts.len() == 2 => {
+                                collect_let_pattern_bindings(&parts[1], out);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        Expression::Int(_) | Expression::Dec(_) => {}
+    }
+}
+
+fn collect_let_pattern_references(
+    pattern: &Expression,
+    bound: &mut HashSet<String>,
+    acc: &mut HashSet<String>,
+) {
+    if let Expression::Apply(items) = pattern {
+        if let Some(Expression::Word(head)) = items.first() {
+            if !matches!(head.as_str(), "tuple" | "vector") {
+                // Record destructuring lowers to this record's accessors, so
+                // retain its declaration without mistaking field labels for
+                // free identifiers.
+                acc.insert(head.clone());
+            }
+        }
+    }
+    collect_let_pattern_bindings(pattern, bound);
+}
+
 /// Type hints are not runtime expressions, but a library declaration named in
 /// one still has to survive tree shaking.  In particular, `(sig value
 /// (Option Int))` is the only runtime-visible reference needed before a
@@ -123,12 +190,10 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                             }
                         }
                         if let Expression::Apply(let_items) = it {
-                            if let [Expression::Word(kw), Expression::Word(name), rhs] =
-                                &let_items[..]
-                            {
+                            if let [Expression::Word(kw), pattern, rhs] = &let_items[..] {
                                 if kw == "let" || kw == "letrec" {
                                     collect_free_idents(rhs, bound, acc);
-                                    bound.insert(name.clone());
+                                    collect_let_pattern_references(pattern, bound, acc);
                                     continue;
                                 }
                             }
@@ -143,7 +208,29 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     }
                     return;
                 }
-                if op == "enum" || op == "record" {
+                if op == "enum" {
+                    for declaration in exprs.iter().skip(2) {
+                        if let Expression::Apply(parts) = declaration {
+                            for type_hint in parts.iter().skip(2).step_by(2) {
+                                collect_type_hint_idents(type_hint, acc);
+                            }
+                        }
+                    }
+                    return;
+                }
+                if op == "record" {
+                    let declarations = &exprs[2..];
+                    let generic_count = declarations
+                        .iter()
+                        .take_while(|item| {
+                            matches!(item, Expression::Word(name)
+                                if name.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+                                    && !matches!(name.as_str(), "Int" | "Dec" | "Bool" | "Char"))
+                        })
+                        .count();
+                    for type_hint in declarations[generic_count..].iter().skip(1).step_by(2) {
+                        collect_type_hint_idents(type_hint, acc);
+                    }
                     return;
                 }
                 if op == "match" {
@@ -163,9 +250,9 @@ fn collect_free_idents(expr: &Expression, bound: &mut HashSet<String>, acc: &mut
                     return;
                 }
                 if op == "let" || op == "letrec" {
-                    if let [_, Expression::Word(name), rhs] = &exprs[..] {
+                    if let [_, pattern, rhs] = &exprs[..] {
                         collect_free_idents(rhs, bound, acc);
-                        bound.insert(name.clone());
+                        collect_let_pattern_references(pattern, bound, acc);
                         return;
                     }
                 }
@@ -190,6 +277,7 @@ fn tree_shake(
     visited: &mut HashSet<String>,
 ) -> Vec<Expression> {
     let mut index = HashMap::new();
+    let mut signatures = HashMap::new();
 
     fn enum_annotation_words(expr: &Expression, out: &mut HashSet<String>) {
         match expr {
@@ -250,6 +338,35 @@ fn tree_shake(
                     }
                     continue;
                 }
+                if kw == "record" {
+                    if let Some(Expression::Word(record_name)) = list.get(1) {
+                        index.insert(record_name.clone(), expr.clone());
+                        let declarations = &list[2..];
+                        let generic_count = declarations
+                            .iter()
+                            .take_while(|item| {
+                                matches!(item, Expression::Word(name)
+                                    if name.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+                                        && !matches!(name.as_str(), "Int" | "Dec" | "Bool" | "Char"))
+                            })
+                            .count();
+                        for field in declarations[generic_count..].chunks_exact(2) {
+                            if let Expression::Word(field_name) = &field[0] {
+                                index.insert(
+                                    format!("{}/{}", record_name, field_name),
+                                    expr.clone(),
+                                );
+                            }
+                        }
+                    }
+                    continue;
+                }
+                if kw == "sig" {
+                    if let Some(Expression::Word(name)) = list.get(1) {
+                        signatures.insert(name.clone(), expr.clone());
+                    }
+                    continue;
+                }
                 let name = if kw == "extern" {
                     list.get(3)
                 } else {
@@ -268,6 +385,7 @@ fn tree_shake(
     fn visit(
         name: &str,
         index: &HashMap<String, Expression>,
+        signatures: &HashMap<String, Expression>,
         kept: &mut Vec<Expression>,
         kept_sources: &mut HashSet<String>,
         visited: &mut HashSet<String>,
@@ -278,14 +396,51 @@ fn tree_shake(
         if let Some(def) = index.get(name) {
             if let Expression::Apply(list) = def {
                 if list.len() >= 3 {
-                    if !matches!(list.first(), Some(Expression::Word(kw)) if kw == "sig") {
-                        let mut deps = HashSet::new();
+                    let mut deps = HashSet::new();
+                    match list.first() {
+                        Some(Expression::Word(kw)) if kw == "enum" => {
+                            for declaration in list.iter().skip(2) {
+                                if let Expression::Apply(parts) = declaration {
+                                    for type_hint in parts.iter().skip(2).step_by(2) {
+                                        collect_type_hint_idents(type_hint, &mut deps);
+                                    }
+                                }
+                            }
+                        }
+                        Some(Expression::Word(kw)) if kw == "record" => {
+                            let declarations = &list[2..];
+                            let generic_count = declarations
+                                .iter()
+                                .take_while(|item| {
+                                    matches!(item, Expression::Word(param)
+                                        if param.chars().next().is_some_and(|first| first.is_ascii_uppercase())
+                                            && !matches!(param.as_str(), "Int" | "Dec" | "Bool" | "Char"))
+                                })
+                                .count();
+                            for type_hint in declarations[generic_count..].iter().skip(1).step_by(2) {
+                                collect_type_hint_idents(type_hint, &mut deps);
+                            }
+                        }
+                        _ => {
                         let mut scoped = HashSet::new();
                         collect_free_idents(&list[2], &mut scoped, &mut deps);
-                        for dep in deps {
-                            visit(&dep, index, kept, kept_sources, visited);
                         }
                     }
+                    if let Some(signature) = signatures.get(name) {
+                        if let Expression::Apply(signature_items) = signature {
+                            if let Some(type_hint) = signature_items.get(2) {
+                                collect_type_hint_idents(type_hint, &mut deps);
+                            }
+                        }
+                    }
+                    for dep in deps {
+                        visit(&dep, index, signatures, kept, kept_sources, visited);
+                    }
+                }
+            }
+            if let Some(signature) = signatures.get(name) {
+                if kept_sources.insert(signature.to_lisp()) {
+                    kept.push(signature.clone());
                 }
             }
             // Several names (the enum type and each of its constructors)
@@ -298,7 +453,14 @@ fn tree_shake(
     }
 
     for name in used {
-        visit(name, &index, &mut kept, &mut kept_sources, visited);
+        visit(
+            name,
+            &index,
+            &signatures,
+            &mut kept,
+            &mut kept_sources,
+            visited,
+        );
     }
 
     kept
@@ -3341,14 +3503,18 @@ pub fn merge_std_and_program(program: &str, std: Vec<Expression>) -> Result<Expr
                 for expr in &desugared {
                     if let Expression::Apply(list) = expr {
                         if let Some(Expression::Word(kw)) = list.first() {
+                            if matches!(kw.as_str(), "let" | "letrec") {
+                                if let Some(pattern) = list.get(1) {
+                                    collect_let_pattern_bindings(pattern, &mut definitions);
+                                }
+                                continue;
+                            }
                             let name = if kw == "extern" {
                                 list.get(3)
                             } else {
                                 list.get(1)
                             };
-                            if (kw == "let"
-                                || kw == "letrec"
-                                || kw == "mut"
+                            if (kw == "mut"
                                 || kw == "extern"
                                 || kw == "sig"
                                 || kw == "enum"

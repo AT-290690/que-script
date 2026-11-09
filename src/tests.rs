@@ -343,6 +343,24 @@ xs)"#,
     }
 
     #[test]
+    fn test_standard_result_carries_typed_success_or_error() {
+        let source = r#"(do
+            (let divide
+              (lambda numerator denominator
+                (if (= denominator 0)
+                  (Result/err "division by zero")
+                  (Result/ok (/ numerator denominator)))))
+            { (match (divide 12 3)
+                (Result/ok value) value
+                (Result/err error) 0)
+              (match (divide 12 0)
+                (Result/ok value) 0
+                (Result/err error) (length error)) })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "{ 4 16 }");
+    }
+
+    #[test]
     fn test_lsp_source_fallback_understands_parameterized_enum_headers() {
         let source = r#"(enum Option T None (Some value T))"#;
         assert_eq!(
@@ -617,6 +635,17 @@ xs)"#,
             (+ left right))"#;
         assert_std_program_output_matches_with_and_without_optimizer(source);
         assert_eq!(run_program_output_with_std_and_opts(source, true), "7");
+    }
+
+    #[test]
+    fn test_record_destructuring_plain_field_can_shadow_tree_shaken_std_name() {
+        let source = r#"(do
+            (record SignedFlag negative? Bool digits [Int])
+            (let value (SignedFlag true [1 2]))
+            (let (SignedFlag negative? digits) value)
+            {negative? digits})"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(run_program_output_with_std_and_opts(source, true), "{ true [1 2] }");
     }
 
     #[test]
@@ -2175,9 +2204,9 @@ xs)"#,
         let output = run_program_output_with_std_and_opts(
             r#"(do
                 (let a (StructBigDec/new-digits false (BigInt/new "12345678901234567890") (BigInt/new "987")))
-                (let b (StructBigDec/new-digits false [2] [5]))
+                (let b (StructBigDec/new-digits false (BigInt [2]) (BigInt [5])))
                 [
-                  (StructBigDec->String (StructBigDec/new-digits false [3] [1 4]))
+                  (StructBigDec->String (StructBigDec/new-digits false (BigInt [3]) (BigInt [1 4])))
                   (StructBigDec->String StructBigDec/pi)
                   (StructBigDec->String (StructBigDec/add a b))
                   (StructBigDec->String (StructBigDec/sub b a))
@@ -3052,7 +3081,7 @@ xs
           (let pick-small (lambda a b (if (BigInt/lt? a b) a b)))
           (let best [(BigInt/new "99")])
           (set! 0 (pick-small (BigInt/new "35") (car best)) best)
-          (Digits->Chars (car best)))"#;
+          (Digits->Chars (BigInt/digits (car best))))"#;
 
         assert_eq!(run_program_output_with_std_and_opts(src, false), "35");
         assert_eq!(run_program_output_with_std_and_opts(src, true), "35");
@@ -3063,9 +3092,9 @@ xs
         let src = r#"(do
           (let keep (lambda value (do (let result [value]) (car result))))
           (let v (keep (BigInt/new "81")))
-          (let before (Digits->Chars v))
+          (let before (Digits->Chars (BigInt/digits v)))
           (let u (keep v))
-          [before (Digits->Chars v) (Digits->Chars u)])"#;
+          [before (Digits->Chars (BigInt/digits v)) (Digits->Chars (BigInt/digits u))])"#;
 
         assert_eq!(
             run_program_output_with_std_and_opts(src, false),
@@ -3267,7 +3296,10 @@ xs
                 { (SignedBigInt/add a b) (SignedBigInt/sub b (SignedBigInt/new "25")) })"#,
             true,
         );
-        assert_eq!(output, "{ { true [1 8] } { true [1 8] } }");
+        assert_eq!(
+            output,
+            "{ SignedBigInt{ negative? true digits BigInt{ digits [1 8]}} SignedBigInt{ negative? true digits BigInt{ digits [1 8]}} }"
+        );
     }
 
     #[test]
@@ -3279,7 +3311,10 @@ xs
                 { (SignedBigInt/mul a b) (SignedBigInt/new "-0") })"#,
             true,
         );
-        assert_eq!(output, "{ { false [1 0 0] } { false [0] } }");
+        assert_eq!(
+            output,
+            "{ SignedBigInt{ negative? false digits BigInt{ digits [1 0 0]}} SignedBigInt{ negative? false digits BigInt{ digits [0]}} }"
+        );
     }
 
     #[test]
@@ -3303,7 +3338,10 @@ xs
                   (SignedBigInt/div (SignedBigInt/new "-7") (SignedBigInt/new "-3")) })"#,
             true,
         );
-        assert_eq!(output, "{ { true [2] } { { true [2] } { false [2] } } }");
+        assert_eq!(
+            output,
+            "{ SignedBigInt{ negative? true digits BigInt{ digits [2]}} { SignedBigInt{ negative? true digits BigInt{ digits [2]}} SignedBigInt{ negative? false digits BigInt{ digits [2]}} } }"
+        );
     }
 
     #[test]
@@ -3322,11 +3360,55 @@ xs
     fn test_runtime_bigint_mod_returns_unsigned_remainder() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                { (BigInt/mod [7] [3])
-                  (BigInt/mod [2 5] [7]) })"#,
+                { (BigInt/mod (BigInt [7]) (BigInt [3]))
+                  (BigInt/mod (BigInt [2 5]) (BigInt [7])) })"#,
             true,
         );
-        assert_eq!(output, "{ [1] [4] }");
+        assert_eq!(
+            output,
+            "{ BigInt{ digits [1]} BigInt{ digits [4]} }"
+        );
+    }
+
+    #[test]
+    fn test_runtime_bigint_unsigned_underflow_and_zero_division_trap() {
+        let underflow = r#"(BigInt/sub BigInt/zero BigInt/one)"#;
+        let division_by_zero = r#"(BigInt/div (BigInt [1 2]) BigInt/zero)"#;
+        let signed_division_by_zero =
+            r#"(SignedBigInt/div (SignedBigInt/new "12") SignedBigInt/zero)"#;
+        for source in [underflow, division_by_zero, signed_division_by_zero] {
+            for enable_optimizer in [false, true] {
+                let error = run_program_error_with_std_unlocked(source, enable_optimizer);
+                assert!(
+                    error.contains("divide by zero"),
+                    "expected explicit arithmetic trap, got: {error}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_runtime_struct_big_dec_division_preserves_divisor_sign_and_traps_on_zero() {
+        let source = r#"(do
+            (let negative-a (StructBigDec/from-scaled 2 (SignedBigInt/new "-5000")))
+            (let negative-b (StructBigDec/from-scaled 3 (SignedBigInt/new "-25000")))
+            (let positive-a (StructBigDec/from-scaled 2 (SignedBigInt/new "5000")))
+            { (StructBigDec->String (StructBigDec/div/precision 2 negative-a negative-b))
+              (StructBigDec->String (StructBigDec/div/precision 2 positive-a negative-b)) })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ \"2.00\" \"-2.00\" }"
+        );
+
+        let division_by_zero = r#"(StructBigDec/div (StructBigDec/from-int 12) StructBigDec/zero)"#;
+        for enable_optimizer in [false, true] {
+            let error = run_program_error_with_std_unlocked(division_by_zero, enable_optimizer);
+            assert!(
+                error.contains("divide by zero"),
+                "expected StructBigDec zero-divisor trap, got: {error}"
+            );
+        }
     }
 
     #[test]
@@ -3383,9 +3465,9 @@ xs
     fn test_runtime_signed_bigint_expt_handles_bigint_exponents() {
         let output = run_program_output_with_std_and_opts(
             r#"(do
-                [ (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [5]))
-                  (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [4]))
-                  (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") [0])) ])"#,
+                [ (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") (BigInt [5])))
+                  (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") (BigInt [4])))
+                  (SignedBigInt->String (SignedBigInt/expt (SignedBigInt/new "-2") (BigInt [0]))) ])"#,
             true,
         );
         assert_eq!(output, "[\"-32\" \"16\" \"1\"]");
@@ -3461,7 +3543,7 @@ xs
                                   (alter! found true)))))
                           (++ i)))
                       (Vector/get-unsafe 0 result))))
-                (Digits->Chars (apply-map-to-value (BigInt/new "20") rows)))"#,
+                (Digits->Chars (BigInt/digits (apply-map-to-value (BigInt/new "20") rows))))"#,
             true,
         );
         assert_eq!(output, "10");
@@ -13348,10 +13430,10 @@ D:=,=,=,+,=,=,=,+,=,=")
                 r#"
 [
 
-(BigInt/div [ 1 0 ] [ 5 ])
-(BigInt/add [ 9 9 9 ] [ 1 2 ])
-(BigInt/sub [ 1 0 1 ] [ 1 1 ])
-(BigInt/mul [ 2 ] [ 9 9 5 ])
+(BigInt/digits (BigInt/div (BigInt [ 1 0 ]) (BigInt [ 5 ])))
+(BigInt/digits (BigInt/add (BigInt [ 9 9 9 ]) (BigInt [ 1 2 ])))
+(BigInt/digits (BigInt/sub (BigInt [ 1 0 1 ]) (BigInt [ 1 1 ])))
+(BigInt/digits (BigInt/mul (BigInt [ 2 ]) (BigInt [ 9 9 5 ])))
 
 ]
 "#,
@@ -13379,19 +13461,19 @@ D:=,=,=,+,=,=,=,+,=,=")
             (
                 r#"
 (letrec factorial (lambda n total
-    (if (= (get 0 n) 0)
+    (if (BigInt/equal? n BigInt/zero)
         total
-        (factorial (BigInt/sub n [ 1 ]) (BigInt/mul total n)))))
+        (factorial (BigInt/sub n BigInt/one) (BigInt/mul total n)))))
 
 (let bionomial-coefficient (lambda a b
-    (BigInt/div (factorial a [ 1 ])
+    (BigInt/div (factorial a BigInt/one)
             (BigInt/mul
-                (factorial b [ 1 ])
-                (factorial (BigInt/sub a b) [ 1 ])))))
+                (factorial b BigInt/one)
+                (factorial (BigInt/sub a b) BigInt/one)))))
 
-(let m [ 2 0 ])
-(let n [ 2 0 ])
-(bionomial-coefficient (BigInt/add m n) m)
+(let m (BigInt [ 2 0 ]))
+(let n (BigInt [ 2 0 ]))
+(BigInt/digits (bionomial-coefficient (BigInt/add m n) m))
 ; [Int]
 ; [1 3 7 8 4 6 5 2 8 8 2 0]"#,
                 "[1 3 7 8 4 6 5 2 8 8 2 0]",
@@ -13923,7 +14005,7 @@ L82")
     (&get S))))
 
 (let part2 (lambda parsed (do
-  (&mut S [0])
+  (&mut S BigInt/zero)
   (for (lambda line (do
     (let N (length line))
     (let stack [])
@@ -13935,7 +14017,7 @@ L82")
   (&get S))))
 
 
-{ (part1 (parse INPUT)) (part2 (parse INPUT)) }"#,
+{ (part1 (parse INPUT)) (BigInt/digits (part2 (parse INPUT))) }"#,
                 "{ 357 [3 1 2 1 9 1 0 7 7 8 6 1 9] }",
             ),
             (
@@ -14002,21 +14084,21 @@ L82")
   (let ranges (sort (lambda [ a ] [ b  ] (BigInt/lt? a b)) rng))
   (&mut low (get 0 0 ranges))
   (&mut high (get 0 1 ranges))
-  (&mut out [ 0 ])
+  (&mut out BigInt/zero)
   (loop/range/exclusive i 1 (length ranges) (do
     (let [ dlow dhigh ] (get i ranges))
     (if (BigInt/gte? (&get high) dlow) (do
       (&alter! low (if (BigInt/lt? (&get low) dlow) (&get low) dlow))
       (&alter! high (if (BigInt/gt? (&get high) dhigh) (&get high) dhigh))) (do
-      (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
+      (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) BigInt/one)))
       (&alter! low (get i 0 ranges))
       (&alter! high (get i 1 ranges))))))
-  (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) [ 1 ])))
+  (&alter! out (BigInt/add (&get out) (BigInt/add (BigInt/sub (&get high) (&get low)) BigInt/one)))
   (&get out))))
 
 (let PARSED (parse INPUT))
 
-[[(part1 PARSED)] (part2 PARSED)]"#,
+[[(part1 PARSED)] (BigInt/digits (part2 PARSED))]"#,
                 "[[3] [1 4]]",
             ),
             (
@@ -14037,11 +14119,11 @@ L82")
 (let part1 (lambda { numbers op } (reduce (lambda a { op i }
     (BigInt/add a
       (cond
-        (=# op '*') (reduce BigInt/mul [1] (get i numbers))
-        (=# op '+') (reduce BigInt/add [0] (get i numbers))
-        []
-      ))) [0] (zip { op (range 0 (length op)) }))))
-(part1 (parse INPUT))"#,
+        (=# op '*') (reduce BigInt/mul BigInt/one (get i numbers))
+        (=# op '+') (reduce BigInt/add BigInt/zero (get i numbers))
+        BigInt/zero
+      ))) BigInt/zero (zip { op (range 0 (length op)) }))))
+(BigInt/digits (part1 (parse INPUT)))"#,
                 "[4 2 7 7 5 5 6]",
             ),
             (
@@ -14124,8 +14206,8 @@ L82")
 (let parse (lambda input (String->Vector '\n' input)))
 (let solution (lambda input (do
   (let data (map (lambda x (map identity x)) input))
-  (&mut beam [ 0 ])
-  (let timeline (map (lambda _ [ 0 ]) (zeroes (length (get 0 data)))))
+  (&mut beam BigInt/zero)
+  (let timeline (map (lambda _ BigInt/zero) (zeroes (length (get 0 data)))))
   (loop/range/exclusive y 0 (length data) (do
     (let line (get y data))
     (loop/range/exclusive x 0 (length line) (do
@@ -14133,18 +14215,18 @@ L82")
       (cond
         (=# c 'S') (do
           (set! x '|' (get (+ y 1) data))
-          (set! x [ 1 ] timeline))
+          (set! x BigInt/one timeline))
         (=# c '^') (if (and (> (- y 1) 0) (=# (get (- y 1) x data) '|')) (do
           (set! (- x 1) '|' (get y data))
           (set! (+ x 1) '|' (get y data))
-          (&alter! beam (BigInt/add (&get beam) [ 1 ]))
+          (&alter! beam (BigInt/add (&get beam) BigInt/one))
           (set! (- x 1) (BigInt/add (get (- x 1) timeline) (get x timeline)) timeline)
           (set! (+ x 1) (BigInt/add (get (+ x 1) timeline) (get x timeline)) timeline)
-          (set! x [ 0 ] timeline)
+          (set! x BigInt/zero timeline)
         ))
         (=# c '.') (if (and (> (- y 1) 0) (=# (get (- y 1) x data) '|')) (do
           (set! x '|' (get y data)))))))))
-  [(&get beam) (BigInt/sum timeline)])))
+  [(BigInt/digits (&get beam)) (BigInt/digits (BigInt/sum timeline))])))
 
 (solution (parse INPUT))"#,
                 "[[2 1] [4 0]]",
@@ -15783,8 +15865,8 @@ humidity-to-location map:
     (car best)))
 
 [
-  (Digits->Chars part1)
-  (Digits->Chars part2)
+  (Digits->Chars (BigInt/digits part1))
+  (Digits->Chars (BigInt/digits part2))
 ]"#, "[\"35\" \"46\"]"),
 (r#"(let INPUT "\#1 @ 1,3: 4x4
 #2 @ 3,1: 4x4

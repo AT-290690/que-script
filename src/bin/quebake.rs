@@ -103,6 +103,7 @@ fn parse_definitions_only(source: &str, label: &str) -> Result<Vec<Expression>, 
             && kw != "letrec"
             && kw != "letmacro"
             && kw != "mut"
+            && kw != "sig"
             && kw != "enum"
             && kw != "record"
         {
@@ -144,7 +145,7 @@ fn usage(bin_name: &str) -> String {
         "Usage: {bin} [--bundle <helpers.que> [more.que ...]] [helpers.que ...] [--out <que-lib.lisp>]\n\
          \n\
          Bakes const/macros/fp/types/ds plus optional helper bundles into an external library file.\n\
-         Helper bundles must contain only top-level definitions (let/letrec/letmacro/mut/enum/record).\n\
+         Helper bundles must contain only top-level definitions (let/letrec/letmacro/mut/sig/enum/record).\n\
          Rebuild/reinstall binaries (and restart LSP/editor) after baking.\n\
          After install, helper bundle source files may be removed.\n\
          \n\

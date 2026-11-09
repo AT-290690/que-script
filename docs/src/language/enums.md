@@ -141,6 +141,52 @@ Every use chooses one payload type. `(Some 1)` and `(Some "one")` can coexist
 in a program, but they have different types: `(Option Int)` and
 `(Option [Char])`.
 
+### Typed choices without overloads
+
+Parameterized enums are also useful when an API needs a choice that must stay
+connected to the type of another argument. Calque functions are not overloaded
+by argument type: one function has one type. Put the type-dependent operation
+in a generic enum instead.
+
+For example, an ordering holds the comparison function for one element type:
+
+```que
+(enum SortOrder T
+  (Asc compare (T -> T -> Bool))
+  (Desc compare (T -> T -> Bool)))
+
+(sig sort-ord ((SortOrder T) -> [T] -> [T]))
+(let sort-ord
+  (lambda (order values)
+    (match order
+      (Asc compare) (sort compare values)
+      (Desc compare) (sort compare values))))
+
+(sig Asc/Int (SortOrder Int))
+(let Asc/Int (Asc <))
+
+(sig Desc/Int (SortOrder Int))
+(let Desc/Int (Desc >))
+
+(sig Asc/Dec (SortOrder Dec))
+(let Asc/Dec (Asc <.))
+
+(sort-ord Asc/Int [3 1 2])
+; [1 2 3]
+
+(sort-ord Desc/Int [3 1 2])
+; [3 2 1]
+
+(sort-ord Asc/Dec [3.2 1.1 2.4])
+; [1.1 2.4 3.2]
+```
+
+`sort-ord` is one polymorphic function, not separate Int and Dec overloads.
+The signature ties the `T` inside `(SortOrder T)` to the element type of
+`[T]`, so `(sort-ord Asc/Int [1.2 2.4])` is a type error. The named values
+`Asc/Int` and `Asc/Dec` are ordinary bindings; an enum variant name does not
+need to encode the concrete type.
+
 Payload enums are also valid `Table` keys. Their tag and fields are hashed and
 compared structurally, including nested payload enums, vectors, tuples, and
 records:

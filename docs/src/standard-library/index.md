@@ -147,8 +147,14 @@ prefer the non-raw name unless you are extending the library itself.
 
 `BigInt/*` implements unsigned arbitrary-precision arithmetic, including
 `new`, `add`, `sub`, `mul`, `div`, `mod`, comparisons, `pow`, `square`,
-`sum`, `product`, and `range`. `SignedBigInt/*` supplies the corresponding
-signed representation. `Date/*` extracts pieces of the date-vector format;
+`sum`, `product`, and `range`. `BigInt` is a nominal record around its digit
+storage, so it cannot be confused with an ordinary `[Int]`. `SignedBigInt/*`
+supplies the corresponding nominal signed representation, and
+`StructBigDec/*` supplies arbitrary-precision decimal arithmetic with an
+explicit precision. `BigInt` is unsigned: `BigInt/sub` requires its first
+argument to be at least its second, and `div`/`mod` require a nonzero divisor.
+Violating either precondition traps rather than wrapping or manufacturing a
+value. Signed and decimal division likewise trap on a zero divisor. `Date/*` extracts pieces of the date-vector format;
 `Meta/*` parses lightweight metadata; `Payload/get` accesses embedded payload
 text.
 
