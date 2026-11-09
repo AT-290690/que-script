@@ -1018,23 +1018,16 @@ fn is_scalar_vector_type(t: &Type) -> bool {
     matches!(t, Type::List(inner) if !is_ref_type(inner))
 }
 
-/// Scalar records can live inline in a vector: each element is its fixed
-/// sequence of i32 fields rather than a pointer to a separately allocated
-/// record. Managed fields deliberately stay on the established vector-of-
-/// references representation because their per-element ownership needs a
-/// bitmap and release path.
-fn packed_scalar_record_vector(t: &Type) -> Option<&crate::types::RecordType> {
-    let Type::List(inner) = t else {
-        return None;
-    };
-    let Type::Record(record) = inner.as_ref() else {
-        return None;
-    };
-    record
-        .fields
-        .iter()
-        .all(|field| !is_ref_type(&field.typ))
-        .then_some(record.as_ref())
+/// Records always have their ordinary managed-pointer representation inside
+/// vectors.  This keeps `[T]` physically uniform for polymorphic code: each
+/// element slot is one i32 value, either an immediate or a managed pointer.
+///
+/// The old inline-record-vector experiment is deliberately disabled.  A
+/// future layout optimization may use private packed storage only when it can
+/// prove the vector never crosses a representation-polymorphic boundary, and
+/// must materialize ordinary record pointers before it does.
+fn packed_scalar_record_vector(_t: &Type) -> Option<&crate::types::RecordType> {
+    None
 }
 
 /// The packed-record vector runtime is sizeable.  Emit it only for a module

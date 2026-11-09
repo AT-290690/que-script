@@ -148,15 +148,16 @@ connected to the type of another argument. Calque functions are not overloaded
 by argument type: one function has one type. Put the type-dependent operation
 in a generic enum instead.
 
-For example, an ordering holds the comparison function for one element type:
+For example, an ordering could use a parameterized enum to choose ascending or
+descending behaviour:
 
 ```que
 (enum SortOrder T
   (Asc compare (T -> T -> Bool))
   (Desc compare (T -> T -> Bool)))
 
-(sig sort-ord ((SortOrder T) -> [T] -> [T]))
-(let sort-ord
+(sig sort-with-direction ((SortOrder T) -> [T] -> [T]))
+(let sort-with-direction
   (lambda (order values)
     (match order
       (Asc compare) (sort compare values)
@@ -171,19 +172,19 @@ For example, an ordering holds the comparison function for one element type:
 (sig Asc/Dec (SortOrder Dec))
 (let Asc/Dec (Asc <.))
 
-(sort-ord Asc/Int [3 1 2])
+(sort-with-direction Asc/Int [3 1 2])
 ; [1 2 3]
 
-(sort-ord Desc/Int [3 1 2])
+(sort-with-direction Desc/Int [3 1 2])
 ; [3 2 1]
 
-(sort-ord Asc/Dec [3.2 1.1 2.4])
+(sort-with-direction Asc/Dec [3.2 1.1 2.4])
 ; [1.1 2.4 3.2]
 ```
 
-`sort-ord` is one polymorphic function, not separate Int and Dec overloads.
+`sort-with-direction` is one polymorphic function, not separate Int and Dec overloads.
 The signature ties the `T` inside `(SortOrder T)` to the element type of
-`[T]`, so `(sort-ord Asc/Int [1.2 2.4])` is a type error. The named values
+`[T]`, so `(sort-with-direction Asc/Int [1.2 2.4])` is a type error. The named values
 `Asc/Int` and `Asc/Dec` are ordinary bindings; an enum variant name does not
 need to encode the concrete type.
 

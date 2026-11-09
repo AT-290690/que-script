@@ -204,13 +204,13 @@ xs)"#,
     }
 
     #[test]
-    fn test_wasi_result_renderer_serializes_packed_scalar_record_vectors() {
+    fn test_wasi_result_renderer_serializes_record_vectors() {
         let source = r#"(do
             (record Point y Int x Int)
             [(Point 0 2) (Point 0 3) (Point 1 2)])"#;
         assert_eq!(
             run_program_output(source),
-            "[Point{ y 0 x 2 } Point{ y 0 x 3 } Point{ y 1 x 2 }]"
+            "[Point{ y 0 x 2} Point{ y 0 x 3} Point{ y 1 x 2}]"
         );
     }
 
@@ -361,6 +361,18 @@ xs)"#,
     }
 
     #[test]
+    fn test_standard_ord_sorts_scalars() {
+        let source = r#"(do
+            { (sort/ord Ord/Int [3 1 2])
+              (sort/ord Ord/Dec [3.2 1.1 2.4]) })"#;
+        assert_std_program_output_matches_with_and_without_optimizer(source);
+        assert_eq!(
+            run_program_output_with_std_and_opts(source, true),
+            "{ [1 2 3] [1.1 2.4 3.2] }"
+        );
+    }
+
+    #[test]
     fn test_lsp_source_fallback_understands_parameterized_enum_headers() {
         let source = r#"(enum Option T None (Some value T))"#;
         assert_eq!(
@@ -378,7 +390,7 @@ xs)"#,
     }
 
     #[test]
-    fn test_scalar_record_vectors_store_fields_inline_and_preserve_vector_operations() {
+    fn test_record_vectors_preserve_vector_operations() {
         let source = r#"(do
             (record Point x Int y Int)
             (let points [])
@@ -394,25 +406,22 @@ xs)"#,
             "{ 5 { 6 2 } }"
         );
 
-        let expr = crate::parser::build(source).expect("packed-record program should build");
+        let expr = crate::parser::build(source).expect("record-vector program should build");
         let wat = crate::wat::compile_program_to_wat_with_opts(&expr, true)
-            .expect("packed-record program should compile");
+            .expect("record-vector program should compile");
         assert!(
-            wat.contains("$vec_new_packed_record_i32"),
-            "scalar record vectors should use inline array-of-struct storage:\n{wat}"
+            !wat.contains("$vec_new_packed_record_i32"),
+            "record vectors must use ordinary pointer storage:\n{wat}"
         );
         assert!(
-            wat.contains("call $vec_prepare_packed_record_set_i32"),
-            "direct record constructors stored in packed vectors must reserve an inline slot before writing their fields:\n{wat}"
+            wat.contains("call $record_new_i32"),
+            "record values stored in vectors must be ordinary record pointers:\n{wat}"
         );
         wat::parse_str(&wat).expect("packed-record module should encode");
     }
 
     #[test]
-    fn test_scalar_record_vector_fusion_falls_back_for_generic_vector_builders() {
-        // `Vector/new` currently uses the general vector builder.  Accessor
-        // fusion must therefore preserve the ordinary record-vector path as
-        // well as the inline packed representation.
+    fn test_record_vector_builder_uses_ordinary_pointer_storage() {
         let source = r#"(do
             (record Point x Int y Int)
             (let points (Vector/new (lambda (i) (Point i (+ i 1))) 2))
@@ -426,14 +435,14 @@ xs)"#,
 
         let wat = compile_std_program_to_wat(source, true);
         assert!(
-            wat.contains("i32.const 1447380021") && wat.contains("call $vec_get_i32"),
-            "record accessor fusion should select packed versus ordinary storage at runtime:\n{wat}"
+            !wat.contains("1447380021") && wat.contains("call $vec_get_i32"),
+            "record-vector access must use ordinary pointer storage:\n{wat}"
         );
         wat::parse_str(&wat).expect("generic record-vector module should encode");
     }
 
     #[test]
-    fn test_packed_record_vector_runtime_is_omitted_without_scalar_record_vectors() {
+    fn test_packed_record_vector_runtime_is_omitted() {
         let plain_source = r#"(do
             (let xs [])
             (push! 1 xs)
@@ -446,14 +455,15 @@ xs)"#,
         );
         wat::parse_str(&plain_wat).expect("ordinary vector module should encode");
 
-        let record_without_vector = r#"(do
+        let record_vector = r#"(do
             (record Point x Int y Int)
-            (let point (Point 3 4))
+            (let points [(Point 3 4)])
+            (let point (get 0 points))
             (+ (Point/x point) (Point/y point)))"#;
-        let record_wat = compile_std_program_to_wat(record_without_vector, true);
+        let record_wat = compile_std_program_to_wat(record_vector, true);
         assert!(
             !record_wat.contains("$vec_new_packed_record_i32"),
-            "a scalar record alone should not enable the packed vector runtime:\n{record_wat}"
+            "record vectors must not enable packed storage:\n{record_wat}"
         );
         wat::parse_str(&record_wat).expect("record-only module should encode");
     }

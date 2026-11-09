@@ -274,6 +274,16 @@ second.
 ; xs is [1 2 4 5]
 ```
 
+For a reusable named order, use `Ord T` and `sort/ord`:
+
+```que
+(sort/ord Ord/Int [5 1 4 2])
+; [1 2 4 5]
+
+(sort/ord Ord/Dec [3.2 1.1 2.4])
+; [1.1 2.4 3.2]
+```
+
 `unique/int` and `unique/char` remove repeated values for their respective
 element types. `group` builds a table keyed by a function result:
 

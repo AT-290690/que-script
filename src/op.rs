@@ -412,7 +412,7 @@ fn scalar_record_binding(node: &TypedExpression) -> Option<ScalarRecordBinding> 
             .all(is_trivially_total_scalar_record_field)
     {
         // Keep the vector and index trivial: the generated projections below
-        // then preserve their evaluation order and make a scalar packed record
+        // then preserve their evaluation order and make a scalar-replaced record
         // element observable only through its fields.
         record
             .fields

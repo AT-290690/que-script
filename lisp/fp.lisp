@@ -1296,6 +1296,16 @@ out)))
   (Vector/sort! fn out)
   out)))
 
+; Sort through a named, typed ordering.  Individual order values infer their
+; types; this signature records the public relationship for library users.
+(sig sort/ord ((Ord T) -> [T] -> [T]))
+(let sort/ord
+  (lambda (order values)
+    (sort (Ord/before? order) values)))
+
+(let Ord/Int (Ord <))
+(let Ord/Dec (Ord <.))
+
 (let sort/bool/desc
   (lambda xs
     (do

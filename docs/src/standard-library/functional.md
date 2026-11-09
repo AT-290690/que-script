@@ -49,6 +49,29 @@ comparison predicate that expresses the desired ordering.
 (sort (lambda (left right) (< left right)) [5 1 4 2])
 ```
 
+`Ord T` packages a reusable comparison for one value type, and `sort/ord`
+uses it. You do not need a `sig` to define an order in ordinary code: the
+constructor and its comparison infer together.
+
+```que
+(sort/ord Ord/Int [5 1 4 2])
+; [1 2 4 5]
+
+(record Point y Int x Int)
+(let Point/row-major
+  (Ord
+    (lambda (a b)
+      (or (< (Point/y a) (Point/y b))
+          (and (= (Point/y a) (Point/y b))
+               (< (Point/x a) (Point/x b)))))))
+
+(sort/ord Point/row-major [(Point 1 0) (Point 0 4)])
+; [Point{ y 0 x 4 } Point{ y 1 x 0 }]
+```
+
+The ordered collection is simply `[Point]`; there is no need for a separate
+`Points` wrapper. `Ord/Int` and `Ord/Dec` are the standard ascending orders.
+
 For allocation-sensitive code, prefer explicit loops and a reserved output
 vector when the result length is known. Pipeline fusion may optimize common
 map/filter/reduce shapes, but clear source invariants remain the first goal.
