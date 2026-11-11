@@ -1430,6 +1430,52 @@ q)))
     (if (not-empty? key) (do (Set/add! key out) nil) nil)) b)
   out)))
 
+(let Set/subset-of?
+  (lambda b a
+    (if (> (Set/count a) (Set/count b))
+      false
+      (do
+        (mut ok true)
+        (mut i 0)
+        (while (and ok (< i (length a)))
+          (do
+            (let bucket (get i a))
+            (mut j 0)
+            (while (and ok (< j (length bucket)))
+              (do
+                (if (not (Set/has? (get j bucket) b))
+                  (alter! ok false)
+                  nil)
+                (alter! j (+ j 1))))
+            (alter! i (+ i 1))))
+        ok))))
+
+(let Set/superset-of?
+  (lambda b a
+    (Set/subset-of? a b)))
+
+(let Set/disjoint-from?
+  (lambda b a
+    (do
+      (let a-count (Set/count a))
+      (let b-count (Set/count b))
+      (let src (if (< a-count b-count) a b))
+      (let trg (if (< a-count b-count) b a))
+      (mut ok true)
+      (mut i 0)
+      (while (and ok (< i (length src)))
+        (do
+          (let bucket (get i src))
+          (mut j 0)
+          (while (and ok (< j (length bucket)))
+            (do
+              (if (Set/has? (get j bucket) trg)
+                (alter! ok false)
+                nil)
+              (alter! j (+ j 1))))
+          (alter! i (+ i 1))))
+      ok)))
+
 (let Table/update! (lambda key init f table (do
   (if (= (length table) 0) (do (Table/resize/raw! 32 table) nil) nil)
   (let idx (Table/hash key table))
