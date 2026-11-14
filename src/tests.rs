@@ -11591,6 +11591,53 @@ n"#;
     }
 
     #[test]
+    fn test_nested_loop_growth_rechecks_dynamic_length_bound() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let source = r#"(do
+            (let q [0])
+            (mut head 0)
+            (while (< head (length q))
+              (let v (get head q))
+              (loop k (< k 2)
+                (when (= v 0)
+                  (push! (+ k 1) q)))
+              (++ head))
+            [head (length q)])"#;
+
+        // The nested loop grows q from [0] to [0 1 2].  The outer condition
+        // is dynamic, so it must read q's current length on every iteration.
+        let debug = run_program_output_with_std_and_opts_unlocked(source, false);
+        let optimized = run_program_output_with_std_and_opts_unlocked(source, true);
+        assert_eq!(debug, "[3 3]");
+        assert_eq!(optimized, debug);
+    }
+
+    #[test]
+    fn test_captured_vector_growth_rechecks_dynamic_length_bound() {
+        let _lock = runtime_exec_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let source = r#"(do
+            (let q [0])
+            (mut head 0)
+            (while (< head (length q))
+              (let grow!
+                (lambda ()
+                  (when (= (length q) 1)
+                    (push! 1 q))))
+              (grow!)
+              (++ head))
+            [head (length q)])"#;
+
+        let debug = run_program_output_with_std_and_opts_unlocked(source, false);
+        let optimized = run_program_output_with_std_and_opts_unlocked(source, true);
+        assert_eq!(debug, "[2 2]");
+        assert_eq!(optimized, debug);
+    }
+
+    #[test]
     fn test_wat_constant_bound_replacement_loop_hoists_scalar_data_pointer_for_set() {
         let _lock = runtime_exec_lock()
             .lock()

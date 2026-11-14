@@ -13998,9 +13998,11 @@ fn vector_mutations_are_loop_replacement_sets(
 ) -> bool {
     match expr {
         Expression::Apply(items) => {
-            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while")
-            {
-                return true;
+            // Both nested loops and closures may mutate a captured vector.
+            // Do not cache a surrounding `i < (length xs)` bound unless all
+            // mutations are known indexed replacements at that same index.
+            if matches!(items.first(), Some(Expression::Word(op)) if op == "lambda" || op == "while") {
+                return false;
             }
             if let [Expression::Word(op), Expression::Word(target), ..] = &items[..] {
                 if target == vector_name {
